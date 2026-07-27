@@ -31,9 +31,13 @@ Local edits always win: a key you changed by hand is skipped and reported in
 `sharezed status`, never clobbered. `PATH` is merged element-wise, so a local
 prepend stays a prepend.
 
+Convergence is **precmd-only, by design**: a shell catches up before its next
+command, not while sitting idle at the prompt. PRD §7.5's `zle -F` path would
+buy an fd and a handler per shell to close a window that ends the moment you
+press enter. Not worth it.
+
 ## Not implemented yet
 
-- `zle -F` instant apply — convergence happens at the next prompt, not while idle.
 - `capture --from-current` (publish a live shell's state).
 - Real pty capture: `zsh -f -i -c` sets `interactive`, but ZLE-only config
   (`bindkey`, `zle -N`) still fails. PRD open question 1.
