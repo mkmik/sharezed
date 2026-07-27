@@ -8,3 +8,8 @@ license = "Apache-2.0"
 
 [dependencies]
 clap = { version = "4", features = ["derive"] }
+glob = "0.3"
+libc = "0.2"
+serde = { version = "1", features = ["derive"] }
+serde_json = "1"
+sha2 = "0.10"
