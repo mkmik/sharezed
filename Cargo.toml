@@ -1,0 +1,10 @@
+[package]
+name = "sharezed"
+version = "0.0.0"
+edition = "2024"
+description = "direnv for everything a shell knows"
+repository = "https://github.com/mkmik/sharezed"
+license = "Apache-2.0"
+
+[dependencies]
+clap = { version = "4", features = ["derive"] }
