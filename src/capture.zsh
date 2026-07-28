@@ -75,12 +75,47 @@ _sz_dump() {
 # $parameters until something reads them — so dumping *is* what creates them.
 # Warm up first, or they show up in S₁ only and look like the bootstrap's work.
 _sz_dump >| /dev/null
+# Split the trace into the files the bootstrap sourced and the externals it
+# ran, re-emitting anything else as the genuine diagnostic it is. Done here
+# rather than in the host because the shell is the only authority on which
+# words are builtins — `[`, `which` and `command` all have /usr/bin twins.
+_sz_untrace() {
+  setopt localoptions extendedglob
+  local line w d
+  local -A seen
+  while IFS= read -r line; do
+    if [[ $line == [+#]##*'> <sourcetrace>' ]]; then
+      line=${line%'> <sourcetrace>'}
+      print -r -- ${${line##[+#]##}%:*} >> $SZ_SRC
+    elif [[ $line == [+#]##*'> '* ]]; then
+      w=${${line#*'> '}%% *}
+      [[ -z $w || $w == *=* ]] && continue
+      (( ${+seen[$w]} )) && continue
+      seen[$w]=1
+      (( ${+builtins[$w]} )) && continue
+      if [[ $w == /* ]]; then
+        [[ -x $w ]] && print -r -- $w >> $SZ_CMDS
+      else
+        for d in $path; do
+          [[ -x $d/$w ]] && { print -r -- $d/$w >> $SZ_CMDS; break }
+        done
+      fi
+    else
+      print -ru2 -- $line
+    fi
+  done
+}
+
 _sz_dump >| $SZ_OUT0
-# SOURCE_TRACE names every file the bootstrap pulls in, on stderr, one line
-# each: the host hashes them all so editing a sourced file still trips the
-# trust gate (§7.7). Not captured state — options are out of scope (§3).
-setopt sourcetrace
-[[ -n $SZ_BOOT ]] && source $SZ_BOOT
-unsetopt sourcetrace
+# SOURCE_TRACE names every file the bootstrap loads; XTRACE names every command
+# it runs — including inside `$(…)` and `<(…)`, which fork and so never reach
+# the parent's command hash table. Both are out-of-scope as state (§3); they
+# feed the trust gate and staleness reporting only.
+: >| $SZ_SRC; : >| $SZ_CMDS
+setopt sourcetrace xtrace
+# unsetopt goes inside: outside the redirect it would trace itself onto the
+# caller's stderr.
+{ { [[ -n $SZ_BOOT ]] && source $SZ_BOOT }; unsetopt xtrace sourcetrace } 2>| $SZ_TRACE
+_sz_untrace < $SZ_TRACE
 _sz_dump >| $SZ_OUT1
 return 0

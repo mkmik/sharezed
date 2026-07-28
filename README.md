@@ -28,6 +28,21 @@ just the one file — `SOURCE_TRACE` collects the list during capture and each
 one is hashed. `doctor` reports which changed, and how many arrived by process
 substitution (`. <(cmd)`), which can't be hashed or reviewed at all.
 
+Capture also fingerprints **every external command the bootstrap ran**, so
+`brew upgrade flux` shows up even though no file you own changed:
+
+```console
+$ sharezed doctor
+WARN 1 of 8 traced command(s) changed since the last publish
+       ~ /opt/homebrew/bin/flux
+       run `sharezed reload` to pick up what they now produce
+```
+
+Under 16 KB a command is a script and gets content-hashed; above that its
+symlink target, size and mtime are enough — package managers put the version
+in the target (`flux -> ../Cellar/flux/2.1.0/bin/flux`), and content-hashing
+your PATH would be 195 MB per reload for no extra signal.
+
 `sharezed status` · `log` · `diff [N]` · `revert N` · `path explain` · `doctor`.
 `SHAREZED_DISABLE=1` is the kill switch; `SHAREZED_IGNORE='*TOKEN* *SECRET*'`
 drops keys at capture time; `SHAREZED_BOOTSTRAP` overrides `~/.zshrc`.

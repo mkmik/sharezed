@@ -10,8 +10,10 @@ use std::process::{Command, Stdio};
 pub struct Capture {
     pub s0: State,
     pub s1: State,
-    /// Every file the bootstrap sourced, in load order, deduplicated.
+    /// Files the bootstrap sourced, in load order.
     pub sources: Vec<PathBuf>,
+    /// External commands it ran, resolved against the bootstrap's own PATH.
+    pub commands: Vec<PathBuf>,
 }
 
 /// ponytail: `zsh -f -i -c` rather than a real pty (§7.1 option B+). It sets
@@ -21,85 +23,47 @@ pub struct Capture {
 pub fn clean_room(bootstrap: &Path) -> R<Capture> {
     let dir = std::env::temp_dir().join(format!("sharezed-{}", std::process::id()));
     fs::create_dir_all(&dir)?;
-    let (harness, o0, o1) = (dir.join("capture.zsh"), dir.join("s0"), dir.join("s1"));
-    fs::write(&harness, include_str!("capture.zsh"))?;
+    let f = |n: &str| dir.join(n);
+    fs::write(f("capture.zsh"), include_str!("capture.zsh"))?;
 
-    let out = Command::new("zsh")
+    let status = Command::new("zsh")
         .args(["-f", "-i", "-c"])
-        .arg(format!("source {}", zq(&harness.to_string_lossy())))
-        .env("SZ_OUT0", &o0)
-        .env("SZ_OUT1", &o1)
+        .arg(format!(
+            "source {}",
+            zq(&f("capture.zsh").to_string_lossy())
+        ))
+        .env("SZ_OUT0", f("s0"))
+        .env("SZ_OUT1", f("s1"))
+        .env("SZ_SRC", f("src"))
+        .env("SZ_CMDS", f("cmds"))
+        .env("SZ_TRACE", f("trace"))
         .env("SZ_BOOT", bootstrap)
         .stdin(Stdio::null())
         .stdout(Stdio::null())
-        .stderr(Stdio::piped())
-        .output()?;
+        .status()?;
 
-    // The bootstrap's own diagnostics still belong on our stderr.
-    let (sources, stderr) = split_source_trace(&String::from_utf8_lossy(&out.stderr));
-    eprint!("{stderr}");
-
-    let read = |p: &Path| -> R<State> {
-        let buf = fs::read(p).map_err(|e| {
-            format!(
-                "capture produced no state ({e}); zsh exited with {}",
-                out.status
-            )
-        })?;
+    let state = |p: PathBuf| -> R<State> {
+        let buf = fs::read(&p)
+            .map_err(|e| format!("capture produced no state ({e}); zsh exited with {status}"))?;
         Ok(state::parse_wire(&buf)?)
     };
+    // Deduplicated, order preserved: the first load is the one that mattered.
+    let list = |p: PathBuf| -> Vec<PathBuf> {
+        let mut out: Vec<PathBuf> = Vec::new();
+        for l in fs::read_to_string(&p).unwrap_or_default().lines() {
+            let l = PathBuf::from(l);
+            if !out.contains(&l) {
+                out.push(l);
+            }
+        }
+        out
+    };
     let cap = Capture {
-        s0: read(&o0)?,
-        s1: read(&o1)?,
-        sources,
+        s0: state(f("s0"))?,
+        s1: state(f("s1"))?,
+        sources: list(f("src")),
+        commands: list(f("cmds")),
     };
     let _ = fs::remove_dir_all(&dir);
     Ok(cap)
-}
-
-/// SOURCE_TRACE emits `+<path>:<line>> <sourcetrace>` per file loaded. Returns
-/// the paths and whatever else the bootstrap wrote to stderr.
-fn split_source_trace(stderr: &str) -> (Vec<PathBuf>, String) {
-    let (mut sources, mut rest) = (Vec::new(), String::new());
-    for line in stderr.lines() {
-        let path = line
-            .strip_suffix("> <sourcetrace>")
-            .and_then(|l| l.trim_start_matches(['+', '#']).rsplit_once(':'))
-            .map(|(path, _lineno)| PathBuf::from(path));
-        match path {
-            Some(p) if !sources.contains(&p) => sources.push(p),
-            Some(_) => {}
-            None => {
-                rest.push_str(line);
-                rest.push('\n');
-            }
-        }
-    }
-    (sources, rest)
-}
-
-#[cfg(test)]
-mod tests {
-    use super::*;
-
-    #[test]
-    fn source_trace_is_split_from_real_diagnostics() {
-        let (src, rest) = split_source_trace(
-            "+/home/m/.zshrc:1> <sourcetrace>\n\
-             zsh: command not found: nope\n\
-             +/home/m/.zsh/zmac:1> <sourcetrace>\n\
-             +/dev/fd/12:1> <sourcetrace>\n\
-             +/home/m/.zshrc:1> <sourcetrace>\n",
-        );
-        assert_eq!(
-            src,
-            [
-                PathBuf::from("/home/m/.zshrc"),
-                PathBuf::from("/home/m/.zsh/zmac"),
-                PathBuf::from("/dev/fd/12"),
-            ],
-            "in load order, deduplicated"
-        );
-        assert_eq!(rest, "zsh: command not found: nope\n");
-    }
 }

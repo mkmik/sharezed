@@ -22,6 +22,11 @@ pub struct Meta {
     /// compares the whole set: editing a sourced file has to trip it too.
     #[serde(default)]
     pub sources: std::collections::BTreeMap<String, String>,
+    /// External commands the bootstrap ran, path -> fingerprint. Upgrading one
+    /// changes what the zshrc produces (`flux completion zsh`) without touching
+    /// a single file, so this is a staleness signal, not a review gate.
+    #[serde(default)]
+    pub commands: std::collections::BTreeMap<String, String>,
 }
 
 pub struct Store {

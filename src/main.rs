@@ -9,7 +9,7 @@ mod store;
 use clap::{Parser, Subcommand};
 use state::{Item, Kind, State};
 use std::io::{Read, Write};
-use std::path::PathBuf;
+use std::path::{Path, PathBuf};
 use std::process::{Command, Stdio};
 use store::{R, Store};
 
@@ -159,6 +159,7 @@ fn reload(channel: &str, allow_flag: bool) -> R {
 
     meta.bootstrap = boot.to_string_lossy().into_owned();
     meta.sources = sources;
+    meta.commands = fingerprints(&cap.commands);
     store.save_meta(&meta)?;
 
     if changes.is_empty() {
@@ -200,7 +201,9 @@ fn allow(channel: &str) -> R {
     let boot = bootstrap();
     let mut meta = store.meta();
     meta.bootstrap = boot.to_string_lossy().into_owned();
-    meta.sources = hash_sources(&capture::clean_room(&boot)?.sources);
+    let cap = capture::clean_room(&boot)?;
+    meta.sources = hash_sources(&cap.sources);
+    meta.commands = fingerprints(&cap.commands);
     let n = meta.sources.len();
     store.save_meta(&meta)?;
     println!("trusted {} and {} sourced file(s)", boot.display(), n - 1);
@@ -223,11 +226,48 @@ fn hash_sources(files: &[PathBuf]) -> std::collections::BTreeMap<String, String>
         .collect()
 }
 
+/// Under this, a file is a script: its content is what matters and reading it
+/// is free. Over it, a compiled binary — content-hashing your PATH is 195 MB
+/// and 0.6s per reload for no extra signal.
+const HASH_BELOW: u64 = 16 * 1024;
+
+/// Metadata is enough to notice an upgrade, and package managers put the
+/// version straight into the symlink target
+/// (`flux -> ../Cellar/flux/2.1.0/bin/flux`).
+fn fingerprint(p: &Path) -> Option<String> {
+    let md = std::fs::metadata(p).ok()?;
+    if md.len() < HASH_BELOW {
+        return Some(sha256(&std::fs::read(p).ok()?));
+    }
+    let target = std::fs::read_link(p).unwrap_or_default();
+    let mtime = md
+        .modified()
+        .ok()?
+        .duration_since(std::time::UNIX_EPOCH)
+        .ok()?
+        .as_secs();
+    Some(format!("{} {} {mtime}", target.display(), md.len()))
+}
+
+fn fingerprints(files: &[PathBuf]) -> std::collections::BTreeMap<String, String> {
+    files
+        .iter()
+        .filter_map(|f| Some((f.to_string_lossy().into_owned(), fingerprint(f)?)))
+        .collect()
+}
+
 fn unhashable(files: &[PathBuf]) -> usize {
     files
         .iter()
         .filter(|f| f.starts_with("/dev/") || !f.is_file())
         .count()
+}
+
+fn verdict(n: usize, changed: usize, what: &str) -> String {
+    match changed {
+        0 => format!("{n} {what}(s) match the last published generation"),
+        c => format!("{c} of {n} {what}(s) changed since the last publish"),
+    }
 }
 
 /// `~ path` changed, `+ path` newly sourced, `- path` no longer sourced.
@@ -499,14 +539,23 @@ fn doctor(channel: &str, prune_missing: bool) -> R {
     let changed = changed_sources(&store.meta().sources, &hash_sources(&first.sources));
     check(
         changed.is_empty(),
-        &format!(
-            "{} sourced file(s) match the last published generation",
-            first.sources.len()
-        ),
+        &verdict(first.sources.len(), changed.len(), "sourced file"),
     );
     for c in &changed {
         println!("   {c}");
     }
+    let stale = changed_sources(&store.meta().commands, &fingerprints(&first.commands));
+    check(
+        stale.is_empty(),
+        &verdict(first.commands.len(), stale.len(), "traced command"),
+    );
+    for s in &stale {
+        println!("   {s}");
+    }
+    if !stale.is_empty() {
+        println!("       run `sharezed reload` to pick up what they now produce");
+    }
+
     let opaque = unhashable(&first.sources);
     if opaque > 0 {
         check(
