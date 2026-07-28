@@ -10,6 +10,7 @@ pub enum Kind {
     Array,
     Assoc,
     Func,
+    Autoload,
     Alias,
     Galias,
     Salias,
@@ -23,6 +24,7 @@ impl Kind {
             Kind::Array => "array",
             Kind::Assoc => "assoc",
             Kind::Func => "func",
+            Kind::Autoload => "autoload",
             Kind::Alias => "alias",
             Kind::Galias => "galias",
             Kind::Salias => "salias",
@@ -99,6 +101,7 @@ pub fn parse_wire(buf: &[u8]) -> Result<State, String> {
             ("param", a) if a.starts_with("array") => Kind::Array,
             ("param", _) => Kind::Scalar,
             ("func", _) => Kind::Func,
+            ("autoload", _) => Kind::Autoload,
             ("alias", _) => Kind::Alias,
             ("galias", _) => Kind::Galias,
             ("salias", _) => Kind::Salias,
@@ -181,10 +184,18 @@ pub fn apply(state: &mut State, changes: &[Change]) {
 /// `+2 functions, ~1 param, -1 alias`
 pub fn summary(changes: &[Change]) -> String {
     let mut parts = Vec::new();
-    for (label, kinds) in [
-        ("param", &[Kind::Scalar, Kind::Array, Kind::Assoc][..]),
-        ("function", &[Kind::Func][..]),
-        ("alias", &[Kind::Alias, Kind::Galias, Kind::Salias][..]),
+    for (one, many, kinds) in [
+        (
+            "param",
+            "params",
+            &[Kind::Scalar, Kind::Array, Kind::Assoc][..],
+        ),
+        ("function", "functions", &[Kind::Func, Kind::Autoload][..]),
+        (
+            "alias",
+            "aliases",
+            &[Kind::Alias, Kind::Galias, Kind::Salias][..],
+        ),
     ] {
         let of = |f: &dyn Fn(&Change) -> bool| {
             changes
@@ -198,10 +209,7 @@ pub fn summary(changes: &[Change]) -> String {
             ("-", of(&|c| c.new.is_none())),
         ] {
             if n > 0 {
-                parts.push(format!(
-                    "{sign}{n} {label}{}",
-                    if n == 1 { "" } else { "s" }
-                ));
+                parts.push(format!("{sign}{n} {}", if n == 1 { one } else { many }));
             }
         }
     }
@@ -238,6 +246,7 @@ mod tests {
             &["param", "A", "association", "2", "k", "v"],
             &["param", "EMPTY", "array", "0"],
             &["func", "work", "", "1", "print hi"],
+            &["autoload", "zmv", "", "0"],
             &["alias", "gs", "", "1", "git status"],
         ]))
         .unwrap();
@@ -246,7 +255,11 @@ mod tests {
         assert_eq!(s[&(Kind::Assoc, "A".into())].vals, ["k", "v"]);
         assert!(s[&(Kind::Array, "EMPTY".into())].vals.is_empty());
         assert_eq!(s[&(Kind::Func, "work".into())].vals, ["print hi"]);
-        assert_eq!(s.len(), 6);
+        assert!(
+            s[&(Kind::Autoload, "zmv".into())].vals.is_empty(),
+            "presence only"
+        );
+        assert_eq!(s.len(), 7);
         assert!(parse_wire(&wire(&[&["param", "X", "scalar", "3", "only-one"]])).is_err());
     }
 

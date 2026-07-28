@@ -29,6 +29,8 @@ _sharezed_cur() {   # kind name -> reply=(value...); returns 1 if the key is abs
             local -A a=( "${(@kvP)n}" )
             for x in ${(ko)a}; do reply+=( "$x" "$a[$x]" ); done ;;
     func)   (( ${+functions[$n]} ))  || return 1; reply=( "$functions[$n]" ) ;;
+    # Presence only: a stub and a loaded body are the same desired state.
+    autoload) (( ${+functions[$n]} )) || return 1 ;;
     alias)  (( ${+aliases[$n]} ))    || return 1; reply=( "$aliases[$n]" ) ;;
     galias) (( ${+galiases[$n]} ))   || return 1; reply=( "$galiases[$n]" ) ;;
     salias) (( ${+saliases[$n]} ))   || return 1; reply=( "$saliases[$n]" ) ;;

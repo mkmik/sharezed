@@ -295,7 +295,9 @@ fn status(channel: &str) -> R {
 
 fn describe(c: &state::Change) -> String {
     let show = |v: &Vec<String>| {
-        let s = v.join(" ");
+        // One line per change: function bodies are multi-line, and `diff` is
+        // what you read before trusting an entry (§7.7).
+        let s = v.join(" ").split_whitespace().collect::<Vec<_>>().join(" ");
         if s.len() > 60 {
             format!("{}…", &s[..s.floor_char_boundary(60)])
         } else {
@@ -418,6 +420,28 @@ fn doctor(channel: &str, prune_missing: bool) -> R {
             check(false, &format!("PATH entry does not exist: {p}"));
         }
     }
+
+    // Capture twice: a bootstrap that branches on the clock or on a file it
+    // rewrites (compinit's `.zcompdump(#qN.mh+24)` does both) is not a pure
+    // function of its text, and every flip publishes a phantom generation.
+    // Only catches a flip whose trigger is armed right now.
+    let ignore = ignore_globs();
+    let capture_twice = || -> R<state::State> {
+        let (s0, s1) = capture::clean_room(&boot)?;
+        Ok(state::effect(&s0, &s1, &ignore))
+    };
+    let flap = state::diff(&capture_twice()?, &capture_twice()?);
+    check(
+        flap.is_empty(),
+        &format!(
+            "bootstrap is reproducible ({} key(s) differ across two captures)",
+            flap.len()
+        ),
+    );
+    for c in &flap {
+        println!("       {} {}", c.kind.as_str(), c.name);
+    }
+
     if warn > 0 {
         return Err(format!("{warn} warning(s)").into());
     }
