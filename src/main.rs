@@ -130,25 +130,35 @@ fn reload(channel: &str, allow_flag: bool) -> R {
     let store = Store::open(channel)?;
     let _lock = store.lock()?;
     let boot = bootstrap();
-    let content = std::fs::read(&boot)
-        .map_err(|e| format!("bootstrap {}: {e} (set SHAREZED_BOOTSTRAP)", boot.display()))?;
-    let hash = sha256(&content);
-    let mut meta = store.meta();
-    if !meta.bootstrap_hash.is_empty() && meta.bootstrap_hash != hash && !allow_flag {
+    if !boot.is_file() {
         return Err(format!(
-            "{} changed since the last publish.\n  review it, then: sharezed allow   (or: sharezed reload --allow)",
+            "bootstrap {} is not a file (set SHAREZED_BOOTSTRAP)",
             boot.display()
         )
         .into());
     }
 
-    let (s0, s1) = capture::clean_room(&boot)?;
-    let desired = state::effect(&s0, &s1, &ignore_globs());
+    // The file list comes out of the capture itself, so the trust gate has to
+    // run after it. Capture is not the dangerous step — publishing is.
+    let cap = capture::clean_room(&boot)?;
+    let sources = hash_sources(&cap.sources);
+    let mut meta = store.meta();
+    let changed = changed_sources(&meta.sources, &sources);
+    if !meta.sources.is_empty() && !changed.is_empty() && !allow_flag {
+        return Err(format!(
+            "{} sourced file(s) changed since the last publish:\n{}\n  review, then: sharezed allow   (or: sharezed reload --allow)",
+            changed.len(),
+            changed.join("\n")
+        )
+        .into());
+    }
+
+    let desired = state::effect(&cap.s0, &cap.s1, &ignore_globs());
     let head = store.head();
     let changes = state::diff(&store.desired(head)?, &desired);
 
     meta.bootstrap = boot.to_string_lossy().into_owned();
-    meta.bootstrap_hash = hash;
+    meta.sources = sources;
     store.save_meta(&meta)?;
 
     if changes.is_empty() {
@@ -182,15 +192,60 @@ fn validate(changes: &[state::Change]) -> R {
     Ok(())
 }
 
+/// Trust the current content of every file the bootstrap sources. Needs its own
+/// capture to learn the file list — rare command, so the second clean-room run
+/// is cheaper than carrying pending state between invocations.
 fn allow(channel: &str) -> R {
     let store = Store::open(channel)?;
     let boot = bootstrap();
     let mut meta = store.meta();
     meta.bootstrap = boot.to_string_lossy().into_owned();
-    meta.bootstrap_hash = sha256(&std::fs::read(&boot)?);
+    meta.sources = hash_sources(&capture::clean_room(&boot)?.sources);
+    let n = meta.sources.len();
     store.save_meta(&meta)?;
-    println!("trusted {}", boot.display());
+    println!("trusted {} and {} sourced file(s)", boot.display(), n - 1);
     Ok(())
+}
+
+/// sha256 every sourced file. Process substitutions (`. <(cmd)`) show up as
+/// `/dev/fd/N` — unhashable, and re-reading that path in *this* process would
+/// name one of our own descriptors, so they are skipped, not guessed at.
+fn hash_sources(files: &[PathBuf]) -> std::collections::BTreeMap<String, String> {
+    files
+        .iter()
+        .filter(|f| !f.starts_with("/dev/") && f.is_file())
+        .filter_map(|f| {
+            Some((
+                f.to_string_lossy().into_owned(),
+                sha256(&std::fs::read(f).ok()?),
+            ))
+        })
+        .collect()
+}
+
+fn unhashable(files: &[PathBuf]) -> usize {
+    files
+        .iter()
+        .filter(|f| f.starts_with("/dev/") || !f.is_file())
+        .count()
+}
+
+/// `~ path` changed, `+ path` newly sourced, `- path` no longer sourced.
+fn changed_sources(
+    was: &std::collections::BTreeMap<String, String>,
+    now: &std::collections::BTreeMap<String, String>,
+) -> Vec<String> {
+    let mut out: Vec<String> = now
+        .iter()
+        .filter(|(p, h)| was.get(*p) != Some(*h))
+        .map(|(p, _)| format!("    {} {p}", if was.contains_key(p) { "~" } else { "+" }))
+        .collect();
+    out.extend(
+        was.keys()
+            .filter(|p| !now.contains_key(*p))
+            .map(|p| format!("    - {p}")),
+    );
+    out
 }
 
 fn revert(channel: &str, seq: u64) -> R {
@@ -402,10 +457,6 @@ fn doctor(channel: &str, prune_missing: bool) -> R {
         ),
         (Some(_), None) => check(true, "hook installed"),
     }
-    check(
-        store.meta().bootstrap_hash == sha256(&std::fs::read(&boot).unwrap_or_default()),
-        &format!("{} matches the last published generation", boot.display()),
-    );
     let cursor = cursor_env();
     check(
         cursor == store.head(),
@@ -426,11 +477,12 @@ fn doctor(channel: &str, prune_missing: bool) -> R {
     // function of its text, and every flip publishes a phantom generation.
     // Only catches a flip whose trigger is armed right now.
     let ignore = ignore_globs();
-    let capture_twice = || -> R<state::State> {
-        let (s0, s1) = capture::clean_room(&boot)?;
-        Ok(state::effect(&s0, &s1, &ignore))
-    };
-    let flap = state::diff(&capture_twice()?, &capture_twice()?);
+    let capture_twice = || -> R<capture::Capture> { capture::clean_room(&boot) };
+    let (first, second) = (capture_twice()?, capture_twice()?);
+    let flap = state::diff(
+        &state::effect(&first.s0, &first.s1, &ignore),
+        &state::effect(&second.s0, &second.s1, &ignore),
+    );
     check(
         flap.is_empty(),
         &format!(
@@ -440,6 +492,29 @@ fn doctor(channel: &str, prune_missing: bool) -> R {
     );
     for c in &flap {
         println!("       {} {}", c.kind.as_str(), c.name);
+    }
+
+    // Every sourced file is code entering 30 shells, so the trust gate covers
+    // all of them, not just the one named in SHAREZED_BOOTSTRAP.
+    let changed = changed_sources(&store.meta().sources, &hash_sources(&first.sources));
+    check(
+        changed.is_empty(),
+        &format!(
+            "{} sourced file(s) match the last published generation",
+            first.sources.len()
+        ),
+    );
+    for c in &changed {
+        println!("   {c}");
+    }
+    let opaque = unhashable(&first.sources);
+    if opaque > 0 {
+        check(
+            false,
+            &format!(
+                "{opaque} sourced file(s) cannot be hashed (process substitution) — unreviewable code"
+            ),
+        );
     }
 
     if warn > 0 {
@@ -477,8 +552,13 @@ mod tests {
              work() { print \"working in $1\" }\ntypeset -a mylist=(a b)\npath=(/opt/x $path)\n",
         )
         .unwrap();
-        let (s0, s1) = capture::clean_room(&boot).unwrap();
-        let d = state::effect(&s0, &s1, &[glob::Pattern::new("*TOKEN*").unwrap()]);
+        let cap = capture::clean_room(&boot).unwrap();
+        let d = state::effect(&cap.s0, &cap.s1, &[glob::Pattern::new("*TOKEN*").unwrap()]);
+        assert!(
+            cap.sources.contains(&boot),
+            "SOURCE_TRACE must name the bootstrap itself: {:?}",
+            cap.sources
+        );
         let _ = std::fs::remove_file(&boot);
 
         let get = |k: Kind, n: &str| d.get(&(k, n.to_string())).map(|i| i.vals.clone());

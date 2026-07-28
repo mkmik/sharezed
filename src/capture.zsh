@@ -76,6 +76,11 @@ _sz_dump() {
 # Warm up first, or they show up in S₁ only and look like the bootstrap's work.
 _sz_dump >| /dev/null
 _sz_dump >| $SZ_OUT0
+# SOURCE_TRACE names every file the bootstrap pulls in, on stderr, one line
+# each: the host hashes them all so editing a sourced file still trips the
+# trust gate (§7.7). Not captured state — options are out of scope (§3).
+setopt sourcetrace
 [[ -n $SZ_BOOT ]] && source $SZ_BOOT
+unsetopt sourcetrace
 _sz_dump >| $SZ_OUT1
 return 0

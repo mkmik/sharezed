@@ -23,6 +23,11 @@ $ sharezed reload --allow
 # every other terminal converges at its next prompt
 ```
 
+`--allow` is the trust gate. It covers **every file your zshrc sources**, not
+just the one file — `SOURCE_TRACE` collects the list during capture and each
+one is hashed. `doctor` reports which changed, and how many arrived by process
+substitution (`. <(cmd)`), which can't be hashed or reviewed at all.
+
 `sharezed status` · `log` · `diff [N]` · `revert N` · `path explain` · `doctor`.
 `SHAREZED_DISABLE=1` is the kill switch; `SHAREZED_IGNORE='*TOKEN* *SECRET*'`
 drops keys at capture time; `SHAREZED_BOOTSTRAP` overrides `~/.zshrc`.

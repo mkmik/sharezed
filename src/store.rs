@@ -18,8 +18,10 @@ const SNAPSHOT_EVERY: u64 = 20;
 pub struct Meta {
     #[serde(default)]
     pub bootstrap: String,
+    /// Every file the bootstrap sourced, path -> sha256. The trust gate (§7.7)
+    /// compares the whole set: editing a sourced file has to trip it too.
     #[serde(default)]
-    pub bootstrap_hash: String,
+    pub sources: std::collections::BTreeMap<String, String>,
 }
 
 pub struct Store {
