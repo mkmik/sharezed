@@ -17,6 +17,15 @@ _sz_allowed_special() {
   [[ $1 == (PATH|path|FPATH|fpath|MANPATH|manpath|CDPATH|cdpath) ]]
 }
 
+# Autoloadable iff it is still a stub, or it was loaded from a file in $fpath
+# named exactly after it. The second half matters: $functions_source[compdef]
+# is `…/compinit`, and `autoload -Uz compdef` would stub out to nothing.
+_sz_is_autoload() {
+  [[ $functions[$1] == "builtin autoload -X"* ]] && return 0
+  local src=${functions_source[$1]:-}
+  [[ -n $src && ${src:t} == $1 ]] && (( ${fpath[(Ie)${src:h}]} ))
+}
+
 _sz_dump() {
   emulate -L zsh   # safe: nothing captured here is option-sensitive (§5.4b)
   local name attrs k
@@ -48,7 +57,14 @@ _sz_dump() {
   for name in ${(k)functions}; do
     # `_*` is zsh's convention for completion functions — out of scope (§3).
     [[ $name == _* ]] && continue
-    print -rN -- func "$name" "" 1 "$functions[$name]"
+    # An autoloadable function is recorded by *presence*, never by body:
+    # whether it has been called yet is a lazy-loading detail, and letting it
+    # into the state makes every "did anything call zmv this run" a phantom diff.
+    if _sz_is_autoload $name; then
+      print -rN -- autoload "$name" "" 0
+    else
+      print -rN -- func "$name" "" 1 "$functions[$name]"
+    fi
   done
   for name attrs in ${(kv)aliases};  do print -rN -- alias  "$name" "" 1 "$attrs"; done
   for name attrs in ${(kv)galiases}; do print -rN -- galias "$name" "" 1 "$attrs"; done

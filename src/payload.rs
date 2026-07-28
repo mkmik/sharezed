@@ -40,18 +40,15 @@ fn flags(kind: Kind, attrs: &str) -> String {
     f
 }
 
-fn is_autoload_stub(vals: &[String]) -> bool {
-    vals.first()
-        .is_some_and(|b| b.trim_start().starts_with("builtin autoload -X"))
-}
-
 /// Aliases and functions go through the builtins, not through `functions[x]=`:
 /// a subscript in an assignment is taken *literally*, so `functions['gs']=…`
 /// defines a function whose name includes the quotes. Verified on zsh 5.9.
 fn set_stmt(c: &Change, vals: &[String]) -> Option<String> {
     let one = || vals.first().cloned().unwrap_or_default();
     Some(match c.kind {
-        Kind::Func if is_autoload_stub(vals) => format!("autoload -Uz -- {}", zq(&c.name)),
+        // Recorded by presence, so the body is irrelevant — and `fpath` is an
+        // ordered-list param, applied earlier in the same entry (§8.7).
+        Kind::Autoload => format!("autoload -Uz -- {}", zq(&c.name)),
         // The body came out of $functions, so it is always re-parsable source.
         Kind::Func => format!("function {} {{\n{}\n}}", zq(&c.name), one()),
         Kind::Alias => format!("alias -- {}", zq(&format!("{}={}", c.name, one()))),
@@ -78,7 +75,7 @@ fn set_stmt(c: &Change, vals: &[String]) -> Option<String> {
 
 fn unset_stmt(c: &Change) -> Option<String> {
     Some(match c.kind {
-        Kind::Func => format!("unfunction -- {}", zq(&c.name)),
+        Kind::Func | Kind::Autoload => format!("unfunction -- {}", zq(&c.name)),
         // `unalias -g` is not accepted; plain unalias removes a global alias.
         Kind::Alias | Kind::Galias => format!("unalias -- {}", zq(&c.name)),
         Kind::Salias => format!("unalias -s -- {}", zq(&c.name)),
@@ -121,7 +118,7 @@ fn order(c: &Change) -> u8 {
     match c.kind {
         _ if is_list(c.kind, &c.attrs) => 0,
         Kind::Scalar | Kind::Array | Kind::Assoc => 1,
-        Kind::Func => 2,
+        Kind::Func | Kind::Autoload => 2,
         _ => 3,
     }
 }
@@ -246,7 +243,7 @@ mod tests {
     #[test]
     fn tombstones_and_autoload_stubs() {
         let tomb = change(Kind::Alias, "gs", "", None, Some(&["git status"]));
-        let stub = change(Kind::Func, "zmv", "", Some(&["builtin autoload -XU"]), None);
+        let stub = change(Kind::Autoload, "zmv", "", Some(&[]), None);
         let add = change(Kind::Alias, "ll", "", Some(&["ls -l"]), None);
         let p = generate(&[(2, vec![tomb, stub, add])], &mut State::new(), &[]);
         assert!(p.contains("unalias -- 'gs'"), "{}", p);
