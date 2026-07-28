@@ -181,10 +181,18 @@ pub fn apply(state: &mut State, changes: &[Change]) {
 /// `+2 functions, ~1 param, -1 alias`
 pub fn summary(changes: &[Change]) -> String {
     let mut parts = Vec::new();
-    for (label, kinds) in [
-        ("param", &[Kind::Scalar, Kind::Array, Kind::Assoc][..]),
-        ("function", &[Kind::Func][..]),
-        ("alias", &[Kind::Alias, Kind::Galias, Kind::Salias][..]),
+    for (one, many, kinds) in [
+        (
+            "param",
+            "params",
+            &[Kind::Scalar, Kind::Array, Kind::Assoc][..],
+        ),
+        ("function", "functions", &[Kind::Func][..]),
+        (
+            "alias",
+            "aliases",
+            &[Kind::Alias, Kind::Galias, Kind::Salias][..],
+        ),
     ] {
         let of = |f: &dyn Fn(&Change) -> bool| {
             changes
@@ -198,10 +206,7 @@ pub fn summary(changes: &[Change]) -> String {
             ("-", of(&|c| c.new.is_none())),
         ] {
             if n > 0 {
-                parts.push(format!(
-                    "{sign}{n} {label}{}",
-                    if n == 1 { "" } else { "s" }
-                ));
+                parts.push(format!("{sign}{n} {}", if n == 1 { one } else { many }));
             }
         }
     }

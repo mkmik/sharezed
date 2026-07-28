@@ -295,7 +295,9 @@ fn status(channel: &str) -> R {
 
 fn describe(c: &state::Change) -> String {
     let show = |v: &Vec<String>| {
-        let s = v.join(" ");
+        // One line per change: function bodies are multi-line, and `diff` is
+        // what you read before trusting an entry (§7.7).
+        let s = v.join(" ").split_whitespace().collect::<Vec<_>>().join(" ");
         if s.len() > 60 {
             format!("{}…", &s[..s.floor_char_boundary(60)])
         } else {

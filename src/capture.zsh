@@ -24,6 +24,12 @@ _sz_dump() {
   for name attrs in ${(kv)parameters}; do
     (( ${_sz_deny[(Ie)$name]} )) && continue
     [[ $name == (SHAREZED_*|_sharezed_*|_sz_*|SZ_OUT*|SZ_BOOT) ]] && continue
+    # Completion-system state is an explicit non-goal (§3), and it is most of
+    # what a compinit'd shell holds: 1498 of 1511 functions on a real zshrc.
+    [[ $name == (_comp*|_patcomps|_postpatcomps|_services|_lastcomp|comppostfuncs|compprefuncs) ]] && continue
+    # Hook arrays name functions a receiving shell may not have — and could
+    # drop sharezed's own precmd. Per-shell wiring, never synced (§5.2, G7).
+    [[ $name == *_functions ]] && continue
     [[ $attrs == *readonly* || $attrs == *local* ]] && continue
     [[ $attrs == *special* ]] && ! _sz_allowed_special $name && continue
     # Tied pairs: carry the array side, suppress the scalar twin (§5.4c).
@@ -40,7 +46,8 @@ _sz_dump() {
   done
 
   for name in ${(k)functions}; do
-    [[ $name == (_sharezed_*|_sz_*) ]] && continue
+    # `_*` is zsh's convention for completion functions — out of scope (§3).
+    [[ $name == _* ]] && continue
     print -rN -- func "$name" "" 1 "$functions[$name]"
   done
   for name attrs in ${(kv)aliases};  do print -rN -- alias  "$name" "" 1 "$attrs"; done
