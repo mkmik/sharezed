@@ -7,10 +7,10 @@ typeset -g SHAREZED_BIN=@BIN@
 typeset -g SHAREZED_CHANNEL=@CHANNEL@
 typeset -gx SHAREZED_HEAD=@HEAD@
 typeset -gx SHAREZED_CONFLICTS=
-# Set by the precmd when SHAREZED_NOTIFY is on. Put it in your prompt:
-#   setopt promptsubst
-#   RPROMPT='${SHAREZED_STALE}'"$RPROMPT"
-typeset -g SHAREZED_STALE=
+
+# Appended to RPROMPT while a reload is pending, when SHAREZED_NOTIFY is set.
+# The leading space is part of it so stripping puts your prompt back exactly.
+typeset -g SHAREZED_SEGMENT=' %F{yellow}↻ sharezed reload%f'
 
 # A fresh shell has just run the bootstrap, so it already *is* the desired
 # state — start at head, not at 0. Exported so `sharezed status` can read it.
@@ -95,12 +95,13 @@ _sharezed_precmd() {
   [[ -n $SHAREZED_AUTORELOAD ]] &&
     $SHAREZED_BIN reload --channel $SHAREZED_CHANNEL --silent
   # Same fork, but it only looks: the human still decides when to publish.
+  # Strip first, then re-add: idempotent across prompts, and it picks up an
+  # RPROMPT your config sets *after* the hook line without saving a copy.
+  # No promptsubst needed — precmd runs before the prompt is rendered.
   if [[ -n $SHAREZED_NOTIFY ]]; then
-    if $SHAREZED_BIN reload --channel $SHAREZED_CHANNEL --check --silent; then
-      SHAREZED_STALE=
-    else
-      SHAREZED_STALE='%F{yellow}↻ sharezed reload%f'
-    fi
+    RPROMPT=${RPROMPT%"$SHAREZED_SEGMENT"}
+    $SHAREZED_BIN reload --channel $SHAREZED_CHANNEL --check --silent ||
+      RPROMPT+=$SHAREZED_SEGMENT
   fi
   [[ -r $SHAREZED_HEAD ]] || return 0
   local head

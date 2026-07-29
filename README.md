@@ -67,17 +67,21 @@ the pair is what belongs in a timer.
 
 ## Being told to reload
 
-`--check` only looks: exit 1 if a capture would find something, 2.5ms, no
-lock. Wire it to your prompt and you never have to remember:
+One line, and you never have to remember:
 
 ```zsh
 export SHAREZED_NOTIFY=1
-setopt promptsubst
-RPROMPT='${SHAREZED_STALE}'"$RPROMPT"     # ↻ sharezed reload, when stale
 ```
 
-The hook sets `SHAREZED_STALE` in precmd; the prompt itself renders with no
-fork. The indicator clears the moment you reload.
+The hook appends `↻ sharezed reload` to your `RPROMPT` while a capture has
+something to do, and takes it back off the moment you reload. It strips before
+it appends, so it's idempotent, it survives a prompt your config sets *after*
+the hook line, and it leaves anything else in `RPROMPT` untouched. No
+`promptsubst` — precmd runs before the prompt is rendered.
+
+The check behind it is `reload --check`: exit 1 if a capture would find
+something, 2.5ms, and no channel lock, since it runs on every prompt in every
+shell.
 
 If you want it to just happen instead:
 
