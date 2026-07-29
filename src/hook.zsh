@@ -10,7 +10,7 @@ typeset -gx SHAREZED_CONFLICTS=
 
 # Appended to RPROMPT while a reload is pending, when SHAREZED_NOTIFY is set.
 # The leading space is part of it so stripping puts your prompt back exactly.
-typeset -g _sharezed_segment=' %F{yellow}↻ run: sharezed reload%f'
+typeset -g _sharezed_segment=' %F{yellow}↻ sharezed reload%f'
 
 # A fresh shell has just run the bootstrap, so it already *is* the desired
 # state — start at head, not at 0. Exported so `sharezed status` can read it.
