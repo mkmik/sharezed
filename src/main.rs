@@ -564,24 +564,18 @@ fn doctor(channel: &str, prune_missing: bool) -> R {
     let head = store.head();
     let mut lines: Vec<(&str, String)> = Vec::new();
 
+    // No direnv ordering check: its zsh hook *prepends* itself to
+    // precmd_functions, so it runs first whatever order the two evals appear
+    // in. §12's advice to place sharezed's line first is a no-op, and warning
+    // about it was warning about nothing.
     let rc_path = zshrc();
     let rc = std::fs::read_to_string(&rc_path).unwrap_or_default();
-    let pos = |needle: &str| rc.lines().position(|l| l.contains(needle));
-    lines.push(match (pos("sharezed hook"), pos("direnv hook")) {
-        (None, _) => (
+    lines.push(match rc.lines().any(|l| l.contains("sharezed hook")) {
+        true => ("ok", format!("hook installed in {}", rc_path.display())),
+        false => (
             "warn",
             format!("no `sharezed hook zsh` in {}", rc_path.display()),
         ),
-        (Some(s), Some(d)) if s > d => (
-            "warn",
-            "direnv's hook runs before sharezed's — swap them, directory scope has to win (§12)"
-                .into(),
-        ),
-        (Some(_), Some(_)) => (
-            "ok",
-            format!("hook installed in {}, before direnv's", rc_path.display()),
-        ),
-        (Some(_), None) => ("ok", format!("hook installed in {}", rc_path.display())),
     });
 
     let cursor = cursor_env();
