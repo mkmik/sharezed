@@ -63,3 +63,7 @@ press enter. Not worth it.
   (`bindkey`, `zle -N`) still fails. PRD open question 1.
 - `reload` inherits the calling shell's `PATH` into the clean room, so local
   prepends can leak into a publish. Check `sharezed diff` before `allow`.
+  Elements under `$TMPDIR` are dropped automatically — they are per-session by
+  construction, and a terminal that mints one per window (cmux does:
+  `$TMPDIR/cmux-cli-shims/$CMUX_PANEL_ID`) would otherwise churn a generation
+  on every reload from a different window. Extend with `SHAREZED_PATH_IGNORE`.

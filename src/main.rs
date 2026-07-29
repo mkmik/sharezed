@@ -117,6 +117,23 @@ fn ignore_globs() -> Vec<glob::Pattern> {
         .collect()
 }
 
+/// Globs whose matching PATH-style elements never reach the log. `$TMPDIR` is
+/// the default because anything under it is per-session by construction.
+fn volatile_globs() -> Vec<glob::Pattern> {
+    let mut pats: Vec<String> = std::env::var("SHAREZED_PATH_IGNORE")
+        .unwrap_or_default()
+        .split([' ', ':'])
+        .filter(|p| !p.is_empty())
+        .map(str::to_string)
+        .collect();
+    if let Ok(tmp) = std::env::var("TMPDIR") {
+        pats.push(format!("{}/*", merge::norm(&tmp)));
+    }
+    pats.iter()
+        .filter_map(|p| glob::Pattern::new(p).ok())
+        .collect()
+}
+
 fn cursor_env() -> u64 {
     std::env::var("SHAREZED_CURSOR")
         .ok()
@@ -153,7 +170,8 @@ fn reload(channel: &str, allow_flag: bool) -> R {
         .into());
     }
 
-    let desired = state::effect(&cap.s0, &cap.s1, &ignore_globs());
+    let mut desired = state::effect(&cap.s0, &cap.s1, &ignore_globs());
+    state::drop_volatile(&mut desired, &volatile_globs());
     let head = store.head();
     let changes = state::diff(&store.desired(head)?, &desired);
 
@@ -559,10 +577,13 @@ fn doctor(channel: &str, prune_missing: bool) -> R {
     let ignore = ignore_globs();
     let capture_twice = || -> R<capture::Capture> { capture::clean_room(&boot) };
     let (first, second) = (capture_twice()?, capture_twice()?);
-    let flap = state::diff(
-        &state::effect(&first.s0, &first.s1, &ignore),
-        &state::effect(&second.s0, &second.s1, &ignore),
-    );
+    let volatile = volatile_globs();
+    let effect = |c: &capture::Capture| {
+        let mut e = state::effect(&c.s0, &c.s1, &ignore);
+        state::drop_volatile(&mut e, &volatile);
+        e
+    };
+    let flap = state::diff(&effect(&first), &effect(&second));
     check(
         flap.is_empty(),
         &format!(

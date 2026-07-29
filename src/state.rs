@@ -132,6 +132,23 @@ pub fn effect(s0: &State, s1: &State, ignore: &[glob::Pattern]) -> State {
         .collect()
 }
 
+/// Drop session-scoped elements from ordered lists. A PATH entry under
+/// `$TMPDIR` is per-session by construction — cmux mints
+/// `$TMPDIR/cmux-cli-shims/$CMUX_PANEL_ID` per terminal panel — so publishing
+/// it churns a generation on every reload from a different terminal and leaks
+/// one shell's temp dir into all the others. cmux's own shell integration
+/// strips these by the same kind of glob.
+pub fn drop_volatile(state: &mut State, globs: &[glob::Pattern]) {
+    for ((kind, _), item) in state.iter_mut() {
+        if is_list(*kind, &item.attrs) {
+            item.vals.retain(|e| {
+                let n = crate::merge::norm(e);
+                !globs.iter().any(|g| g.matches(&n))
+            });
+        }
+    }
+}
+
 /// Δₙ = diff(Sₙ₋₁, Sₙ).
 pub fn diff(prev: &State, next: &State) -> Vec<Change> {
     let mut out = Vec::new();
@@ -282,6 +299,26 @@ mod tests {
         apply(&mut prev, &d);
         assert_eq!(prev, next, "replaying Δ reproduces the desired state");
         assert!(diff(&prev, &next).is_empty());
+    }
+
+    #[test]
+    fn session_scoped_path_elements_are_dropped() {
+        let mut s = parse_wire(&wire(&[&[
+            "param",
+            "path",
+            "array-tied",
+            "3",
+            "/usr/bin",
+            "/var/folders/x/T//cmux-cli-shims/UUID",
+            "/home/m/bin",
+        ]]))
+        .unwrap();
+        drop_volatile(&mut s, &[glob::Pattern::new("/var/folders/x/T/*").unwrap()]);
+        assert_eq!(
+            s[&(Kind::Array, "path".into())].vals,
+            ["/usr/bin", "/home/m/bin"],
+            "the doubled slash must not let it through"
+        );
     }
 
     #[test]
