@@ -47,6 +47,22 @@ symlink target, size and mtime are enough — package managers put the version
 in the target (`flux -> ../Cellar/flux/2.1.0/bin/flux`), and content-hashing
 your PATH would be 195 MB per reload for no extra signal.
 
+`reload --if-changed` re-hashes what the last capture recorded and does
+nothing unless something moved — no shell, **3ms against 1.1s**, so it is
+cheap enough for a timer:
+
+```console
+$ sharezed reload --if-changed
+gen 5: 14 files and 10 commands unchanged
+$ sharezed reload --if-changed          # after editing ~/.zsh/zmac
+changed: /Users/mkm/.zsh/zmac
+gen 5 → gen 6: +1 function
+```
+
+Files are compared by content, so `touch` alone doesn't trigger a capture.
+Adding a `source` line or a new command means editing a file that is already
+tracked, so it shows up here first.
+
 `sharezed status` · `log` · `diff [N]` · `revert N` · `path explain` · `doctor`.
 `SHAREZED_DISABLE=1` is the kill switch; `SHAREZED_IGNORE='*TOKEN* *SECRET*'`
 drops keys at capture time; `SHAREZED_BOOTSTRAP` overrides `~/.zshrc`.

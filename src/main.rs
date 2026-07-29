@@ -27,7 +27,11 @@ struct Cli {
 #[derive(Subcommand)]
 enum Cmd {
     /// Clean-room capture of the bootstrap script; publish the delta.
-    Reload,
+    Reload {
+        /// Skip the capture entirely unless a tracked file or command changed.
+        #[arg(long)]
+        if_changed: bool,
+    },
     /// Cursor vs head, pending entries, conflicts.
     Status,
     /// Human-readable view of an entry (default: the newest).
@@ -78,7 +82,7 @@ fn main() {
 fn run(cli: &Cli) -> R {
     let ch = &cli.channel;
     match &cli.command {
-        Cmd::Reload => reload(ch),
+        Cmd::Reload { if_changed } => reload(ch, *if_changed),
         Cmd::Status => status(ch),
         Cmd::Diff { seq } => diff(ch, *seq),
         Cmd::Log => log(ch),
@@ -152,7 +156,7 @@ fn cursor_env() -> u64 {
 
 // --- producer ---------------------------------------------------------------
 
-fn reload(channel: &str) -> R {
+fn reload(channel: &str, if_changed: bool) -> R {
     let store = Store::open(channel)?;
     let _lock = store.lock()?;
     let boot = bootstrap();
@@ -162,9 +166,28 @@ fn reload(channel: &str) -> R {
         return Err(format!("bootstrap {} is not a file", b.display()).into());
     }
 
+    let mut meta = store.meta();
+    // Re-hashing what the last capture recorded needs no shell at all, so this
+    // is milliseconds against a second-plus. Adding a new `source` line or a
+    // new command means editing a file that is already tracked, so a change
+    // that matters always shows up here first.
+    if if_changed && !meta.sources.is_empty() {
+        match stale_dep(&meta) {
+            None => {
+                println!(
+                    "gen {}: {} and {} unchanged",
+                    store.head(),
+                    plural(meta.sources.len(), "file"),
+                    plural(meta.commands.len(), "command")
+                );
+                return Ok(());
+            }
+            Some(p) => println!("changed: {p}"),
+        }
+    }
+
     let cap = capture::clean_room(boot.as_deref())?;
     let sources = hash_sources(&cap.sources);
-    let mut meta = store.meta();
 
     let mut desired = state::effect(&cap.s0, &cap.s1, &ignore_globs());
     state::drop_volatile(&mut desired, &volatile_globs());
@@ -221,6 +244,21 @@ fn hash_sources(files: &[PathBuf]) -> std::collections::BTreeMap<String, String>
             ))
         })
         .collect()
+}
+
+/// The first tracked file or command whose fingerprint no longer matches.
+fn stale_dep(meta: &store::Meta) -> Option<String> {
+    let file_now = |p: &str| Some(sha256(&std::fs::read(p).ok()?));
+    (meta
+        .sources
+        .iter()
+        .find(|(p, h)| file_now(p).as_ref() != Some(*h)))
+    .or_else(|| {
+        meta.commands
+            .iter()
+            .find(|(p, f)| fingerprint(Path::new(p)).as_ref() != Some(*f))
+    })
+    .map(|(p, _)| p.clone())
 }
 
 /// Under this, a file is a script: its content is what matters and reading it
@@ -506,7 +544,6 @@ fn doctor(channel: &str, prune_missing: bool) -> R {
     let store = Store::open(channel)?;
     let head = store.head();
     let mut lines: Vec<(&str, String)> = Vec::new();
-    let plural = |n: usize, s: &str| format!("{n} {s}{}", if n == 1 { "" } else { "s" });
 
     let rc_path = zshrc();
     let rc = std::fs::read_to_string(&rc_path).unwrap_or_default();
@@ -622,6 +659,10 @@ fn doctor(channel: &str, prune_missing: bool) -> R {
         0 => Ok(()),
         n => Err(plural(n, "warning").into()),
     }
+}
+
+fn plural(n: usize, s: &str) -> String {
+    format!("{n} {s}{}", if n == 1 { "" } else { "s" })
 }
 
 fn sha256(data: &[u8]) -> String {
