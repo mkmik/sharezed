@@ -399,6 +399,24 @@ fn describe(c: &state::Change) -> String {
             s
         }
     };
+    // A 40-element PATH truncated to 60 chars is two identical-looking
+    // prefixes, so lists get an element-wise diff instead.
+    if let (Some(o), Some(n)) = (&c.old, &c.new)
+        && matches!(c.kind, Kind::Array | Kind::Assoc)
+    {
+        let mut out = format!(
+            "  ~ {:<7} {:<24} {} → {} elements",
+            c.kind.as_str(),
+            c.name,
+            o.len(),
+            n.len()
+        );
+        for line in element_diff(o, n) {
+            out.push('\n');
+            out.push_str(&line);
+        }
+        return out;
+    }
     let (sign, detail) = match (&c.old, &c.new) {
         (None, Some(n)) => ("+", show(n)),
         (Some(o), Some(n)) => ("~", format!("{} → {}", show(o), show(n))),
@@ -406,6 +424,28 @@ fn describe(c: &state::Change) -> String {
         (None, None) => ("?", String::new()),
     };
     format!("  {sign} {:<7} {:<24} {detail}", c.kind.as_str(), c.name)
+}
+
+/// Removals with their old position, then additions with their new one. A
+/// moved element shows as both, which is the truth for a priority-ordered
+/// list: its index *is* its meaning.
+fn element_diff(old: &[String], new: &[String]) -> Vec<String> {
+    let matched = merge::lcs(old, new);
+    let (kept_old, kept_new): (std::collections::HashSet<_>, std::collections::HashSet<_>) =
+        matched.into_iter().unzip();
+    let pick = |v: &[String], kept: &std::collections::HashSet<usize>, sign: char| -> Vec<String> {
+        v.iter()
+            .enumerate()
+            .filter(|(i, _)| !kept.contains(i))
+            .map(|(i, e)| format!("      {sign} {:>3}  {e}", i + 1))
+            .collect()
+    };
+    let mut out = pick(old, &kept_old, '-');
+    out.extend(pick(new, &kept_new, '+'));
+    if out.is_empty() {
+        out.push("        (same elements; attributes changed)".into());
+    }
+    out
 }
 
 fn diff(channel: &str, seq: Option<u64>) -> R {
@@ -585,6 +625,24 @@ mod tests {
     fn cli_is_valid() {
         use clap::CommandFactory;
         Cli::command().debug_assert();
+    }
+
+    #[test]
+    fn list_changes_render_element_wise() {
+        let v = |s: &[&str]| s.iter().map(|x| x.to_string()).collect::<Vec<_>>();
+        // /c moves to the front, /b goes away, /new arrives
+        let d = element_diff(&v(&["/a", "/b", "/c"]), &v(&["/c", "/new", "/a"]));
+        assert_eq!(
+            d,
+            [
+                "      -   1  /a",
+                "      -   2  /b",
+                "      +   2  /new",
+                "      +   3  /a",
+            ],
+            "a move is a removal plus an addition: in a priority-ordered list the index is the meaning"
+        );
+        assert!(element_diff(&v(&["/a"]), &v(&["/a"]))[0].contains("attributes changed"));
     }
 
     /// A channel with nothing published must not make every prompt print an
