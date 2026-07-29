@@ -587,6 +587,28 @@ mod tests {
         Cli::command().debug_assert();
     }
 
+    /// A channel with nothing published must not make every prompt print an
+    /// error. Shell-level, so no amount of Rust testing would have caught it.
+    #[test]
+    fn hook_is_silent_when_head_is_missing() {
+        let head = std::env::temp_dir().join("sharezed-no-such-head");
+        let _ = std::fs::remove_file(&head);
+        let hook = include_str!("hook.zsh")
+            .replace("@BIN@", "'/nonexistent'")
+            .replace("@CHANNEL@", "'user'")
+            .replace("@HEAD@", &payload::zq(&head.to_string_lossy()));
+        let out = Command::new("zsh")
+            .args(["-f", "-c"])
+            .arg(format!("{hook}\n_sharezed_precmd\n_sharezed_precmd"))
+            .output()
+            .unwrap();
+        assert_eq!(
+            String::from_utf8_lossy(&out.stderr),
+            "",
+            "hook must be silent when the channel is empty"
+        );
+    }
+
     /// M0's exit criterion, end to end: capture a bootstrap in a clean room and
     /// see exactly what it added. Needs zsh; skipped if absent.
     #[test]

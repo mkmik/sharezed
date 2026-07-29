@@ -49,7 +49,14 @@ impl Store {
         if md.mode() & 0o077 != 0 {
             return Err(format!("{} is group/world accessible", dir.display()).into());
         }
-        Ok(Store { dir })
+        let store = Store { dir };
+        // A channel with nothing published still needs its `head`: the hook
+        // reads it on every prompt, and a missing file is a redirection error
+        // zsh prints no matter how it is redirected.
+        if !store.head_path().exists() {
+            write_atomic(&store.head_path(), b"0\n")?;
+        }
+        Ok(store)
     }
 
     pub fn head_path(&self) -> PathBuf {

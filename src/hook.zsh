@@ -10,8 +10,10 @@ typeset -gx SHAREZED_CONFLICTS=
 
 # A fresh shell has just run the bootstrap, so it already *is* the desired
 # state — start at head, not at 0. Exported so `sharezed status` can read it.
+# `2>/dev/null` cannot silence this: a failed *redirection* is reported by the
+# shell on its own stderr, before the redirect it would have been muted by.
 typeset -gx SHAREZED_CURSOR=0
-read -r SHAREZED_CURSOR 2>/dev/null < $SHAREZED_HEAD || SHAREZED_CURSOR=0
+[[ -r $SHAREZED_HEAD ]] && read -r SHAREZED_CURSOR < $SHAREZED_HEAD
 
 # Merge base for a list param the log has never carried before (§8.9): what
 # this shell had when the hook was installed.
@@ -82,8 +84,9 @@ _sharezed_apply() {
 
 _sharezed_precmd() {
   [[ -n $SHAREZED_DISABLE ]] && return 0
+  [[ -r $SHAREZED_HEAD ]] || return 0
   local head
-  read -r head 2>/dev/null < $SHAREZED_HEAD || return 0
+  read -r head < $SHAREZED_HEAD || return 0
   [[ $head == $SHAREZED_CURSOR ]] && return 0
   if ! _sharezed_apply; then
     # ponytail: quarantine after one failure, not N. A poison entry costs a
