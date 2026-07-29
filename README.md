@@ -10,9 +10,13 @@ Design: [docs/PRD.md](docs/PRD.md).
 
 ```zsh
 cargo install --path .
-eval "$(sharezed hook zsh)"    # in ~/.zshrc, before direnv's hook
-eval "$(direnv hook zsh)"
+eval "$(sharezed hook zsh)"    # in ~/.zshrc
 ```
+
+Order relative to direnv doesn't matter: its zsh hook prepends itself to
+`precmd_functions`, so it runs first either way. sharezed's PATH merge treats
+direnv's directory-scoped entries as local additions and keeps them, which is
+what makes the two compose — not the order of the two `eval` lines.
 
 ## Use
 
