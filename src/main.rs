@@ -156,8 +156,6 @@ fn cursor_env() -> u64 {
 // --- producer ---------------------------------------------------------------
 
 fn reload(channel: &str, force: bool, silent: bool, check: bool) -> R {
-    // Any invocation of a new binary is a chance to tell running shells that
-    // its hook moved — `--check` fires every prompt, `reload` when you type it.
     // Errors keep going to stderr: silent is about routine chatter on a timer,
     // not about hiding a broken bootstrap.
     let say = |msg: String| {
