@@ -156,6 +156,8 @@ fn cursor_env() -> u64 {
 // --- producer ---------------------------------------------------------------
 
 fn reload(channel: &str, force: bool, silent: bool, check: bool) -> R {
+    // Any invocation of a new binary is a chance to tell running shells that
+    // its hook moved — `--check` fires every prompt, `reload` when you type it.
     // Errors keep going to stderr: silent is about routine chatter on a timer,
     // not about hiding a broken bootstrap.
     let say = |msg: String| {
@@ -164,6 +166,7 @@ fn reload(channel: &str, force: bool, silent: bool, check: bool) -> R {
         }
     };
     let store = Store::open(channel)?;
+    store.note_hook_version(&hook_version())?;
     if check {
         // Deliberately before the lock: this runs on every prompt in every
         // shell, and an exclusive flock there would serialize all of them.
@@ -368,6 +371,7 @@ fn revert(channel: &str, seq: u64) -> R {
 
 fn export(channel: &str, cursor: u64) -> R {
     let store = Store::open(channel)?;
+    store.note_hook_version(&hook_version())?;
     let head = store.head();
     let mut buf = Vec::new();
     std::io::stdin().read_to_end(&mut buf)?;
@@ -386,8 +390,15 @@ fn export(channel: &str, cursor: u64) -> R {
     Ok(())
 }
 
+/// Identifies the hook text this binary ships, so a shell running an older one
+/// can notice and re-eval it.
+fn hook_version() -> String {
+    sha256(include_str!("hook.zsh").as_bytes())[..12].to_string()
+}
+
 fn hook(channel: &str) -> R {
     let store = Store::open(channel)?;
+    store.note_hook_version(&hook_version())?;
     let bin = std::env::current_exe()?;
     print!(
         "{}",
@@ -395,6 +406,11 @@ fn hook(channel: &str) -> R {
             .replace("@BIN@", &payload::zq(&bin.to_string_lossy()))
             .replace("@CHANNEL@", &payload::zq(channel))
             .replace("@HEAD@", &payload::zq(&store.head_path().to_string_lossy()))
+            .replace(
+                "@HOOKFILE@",
+                &payload::zq(&store.hookver_path().to_string_lossy())
+            )
+            .replace("@HOOKVER@", &payload::zq(&hook_version()))
     );
     Ok(())
 }

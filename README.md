@@ -114,6 +114,20 @@ command, not while sitting idle at the prompt. PRD §7.5's `zle -F` path would
 buy an fd and a handler per shell to close a window that ends the moment you
 press enter. Not worth it.
 
+## Upgrading
+
+Running shells adopt a new hook on their next prompt: the binary records its
+hook's version next to the log, and the precmd notices with the same fork-free
+read it already does for `head`. Redefining a running function is safe in zsh,
+so the fork only happens when the hook actually changed.
+
+Shells started before this existed have no version to compare, so they need
+one last manual nudge:
+
+```zsh
+eval "$(sharezed hook zsh)"
+```
+
 ## Not implemented yet
 
 - `capture --from-current` (publish a live shell's state).
