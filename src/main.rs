@@ -260,13 +260,6 @@ fn unhashable(files: &[PathBuf]) -> usize {
         .count()
 }
 
-fn verdict(n: usize, changed: usize, what: &str) -> String {
-    match changed {
-        0 => format!("{n} {what}(s) match the last published generation"),
-        c => format!("{c} of {n} {what}(s) changed since the last publish"),
-    }
-}
-
 /// `~ path` changed, `+ path` newly sourced, `- path` no longer sourced.
 fn changed_sources(
     was: &std::collections::BTreeMap<String, String>,
@@ -512,105 +505,143 @@ fn path_explain(channel: &str) -> R {
     Ok(())
 }
 
+/// Every line states what *is*, never what ought to be — "ok" next to "must
+/// come after" leaves you unable to tell whether it did. `note` is for things
+/// that are true, unactionable, and permanent; only `warn` sets the exit code,
+/// so a clean shell can rely on it.
 fn doctor(channel: &str, prune_missing: bool) -> R {
     let store = Store::open(channel)?;
-    let mut warn = 0;
-    let mut check = |ok: bool, msg: &str| {
-        println!("{} {msg}", if ok { "ok  " } else { "WARN" });
-        warn += u32::from(!ok);
-    };
+    let head = store.head();
+    let mut lines: Vec<(&str, String)> = Vec::new();
+    let plural = |n: usize, s: &str| format!("{n} {s}{}", if n == 1 { "" } else { "s" });
 
-    let boot = bootstrap();
     let rc_path = zshrc();
     let rc = std::fs::read_to_string(&rc_path).unwrap_or_default();
     let pos = |needle: &str| rc.lines().position(|l| l.contains(needle));
-    match (pos("sharezed hook"), pos("direnv hook")) {
-        (None, _) => check(
-            false,
-            &format!("no `sharezed hook zsh` in {}", rc_path.display()),
+    lines.push(match (pos("sharezed hook"), pos("direnv hook")) {
+        (None, _) => (
+            "warn",
+            format!("no `sharezed hook zsh` in {}", rc_path.display()),
         ),
-        (Some(s), Some(d)) => check(
-            s < d,
-            "direnv hook must come after sharezed's — directory scope has to win (§12)",
+        (Some(s), Some(d)) if s > d => (
+            "warn",
+            "direnv's hook runs before sharezed's — swap them, directory scope has to win (§12)"
+                .into(),
         ),
-        (Some(_), None) => check(true, "hook installed"),
-    }
-    let cursor = cursor_env();
-    check(
-        cursor == store.head(),
-        &format!("cursor {cursor} vs head {} in this shell", store.head()),
-    );
+        (Some(_), Some(_)) => (
+            "ok",
+            format!("hook installed in {}, before direnv's", rc_path.display()),
+        ),
+        (Some(_), None) => ("ok", format!("hook installed in {}", rc_path.display())),
+    });
 
-    if prune_missing {
-        for p in live_path()
-            .iter()
-            .filter(|p| !p.is_empty() && !PathBuf::from(p).is_dir())
-        {
-            check(false, &format!("PATH entry does not exist: {p}"));
-        }
-    }
+    let cursor = cursor_env();
+    lines.push(match () {
+        _ if std::env::var_os("SHAREZED_HEAD").is_none() => (
+            "note",
+            "this shell has no hook, so it will not converge on its own".into(),
+        ),
+        _ if cursor == head => ("ok", format!("this shell is up to date (gen {head})")),
+        _ => (
+            "warn",
+            format!("this shell is at gen {cursor}, {head} is published"),
+        ),
+    });
 
     // Capture twice: a bootstrap that branches on the clock or on a file it
     // rewrites (compinit's `.zcompdump(#qN.mh+24)` does both) is not a pure
     // function of its text, and every flip publishes a phantom generation.
     // Only catches a flip whose trigger is armed right now.
-    let ignore = ignore_globs();
+    let boot = bootstrap();
     let capture_twice = || -> R<capture::Capture> { capture::clean_room(boot.as_deref()) };
     let (first, second) = (capture_twice()?, capture_twice()?);
-    let volatile = volatile_globs();
+    let (ignore, volatile) = (ignore_globs(), volatile_globs());
     let effect = |c: &capture::Capture| {
         let mut e = state::effect(&c.s0, &c.s1, &ignore);
         state::drop_volatile(&mut e, &volatile);
         e
     };
     let flap = state::diff(&effect(&first), &effect(&second));
-    check(
-        flap.is_empty(),
-        &format!(
-            "bootstrap is reproducible ({} key(s) differ across two captures)",
-            flap.len()
-        ),
-    );
-    for c in &flap {
-        println!("       {} {}", c.kind.as_str(), c.name);
-    }
-
-    // Every sourced file is code entering 30 shells, so the trust gate covers
-    // all of them, not just the one named in SHAREZED_BOOTSTRAP.
-    let changed = changed_sources(&store.meta().sources, &hash_sources(&first.sources));
-    check(
-        changed.is_empty(),
-        &verdict(first.sources.len(), changed.len(), "sourced file"),
-    );
-    for c in &changed {
-        println!("   {c}");
-    }
-    let stale = changed_sources(&store.meta().commands, &fingerprints(&first.commands));
-    check(
-        stale.is_empty(),
-        &verdict(first.commands.len(), stale.len(), "traced command"),
-    );
-    for s in &stale {
-        println!("   {s}");
-    }
-    if !stale.is_empty() {
-        println!("       run `sharezed reload` to pick up what they now produce");
-    }
-
-    let opaque = unhashable(&first.sources);
-    if opaque > 0 {
-        check(
-            false,
-            &format!(
-                "{opaque} sourced file(s) cannot be hashed (process substitution) — unreviewable code"
+    if flap.is_empty() {
+        lines.push(("ok", "capture is reproducible".into()));
+    } else {
+        lines.push((
+            "warn",
+            format!(
+                "capture is not reproducible: {} between two runs",
+                plural(flap.len(), "key differs")
             ),
+        ));
+        lines.extend(
+            flap.iter()
+                .map(|c| ("", format!("{} {}", c.kind.as_str(), c.name))),
         );
     }
 
-    if warn > 0 {
-        return Err(format!("{warn} warning(s)").into());
+    for (what, was, now, total) in [
+        (
+            "sourced file",
+            store.meta().sources,
+            hash_sources(&first.sources),
+            first.sources.len(),
+        ),
+        (
+            "command",
+            store.meta().commands,
+            fingerprints(&first.commands),
+            first.commands.len(),
+        ),
+    ] {
+        let changed = changed_sources(&was, &now);
+        if changed.is_empty() {
+            lines.push((
+                "ok",
+                format!("{} unchanged since gen {head}", plural(total, what)),
+            ));
+        } else {
+            lines.push((
+                "warn",
+                format!(
+                    "{} changed since gen {head} — run `sharezed reload`",
+                    plural(changed.len(), what)
+                ),
+            ));
+            lines.extend(changed.iter().map(|c| ("", c.trim().to_string())));
+        }
     }
-    Ok(())
+
+    // Permanent and unactionable on any config that uses `. <(cmd)`, so it must
+    // not be a warning: the command that produced it *is* fingerprinted above.
+    let opaque = unhashable(&first.sources);
+    if opaque > 0 {
+        lines.push((
+            "note",
+            format!(
+                "{} sourced by process substitution; content untracked, but the command is",
+                plural(opaque, "file")
+            ),
+        ));
+    }
+
+    if prune_missing {
+        for p in live_path()
+            .iter()
+            .filter(|p| !p.is_empty() && !PathBuf::from(p).is_dir())
+        {
+            lines.push(("warn", format!("PATH entry no longer exists: {p}")));
+        }
+    }
+
+    for (level, msg) in &lines {
+        match *level {
+            "" => println!("       {msg}"),
+            l => println!("{l:<5}  {msg}"),
+        }
+    }
+    match lines.iter().filter(|(l, _)| *l == "warn").count() {
+        0 => Ok(()),
+        n => Err(plural(n, "warning").into()),
+    }
 }
 
 fn sha256(data: &[u8]) -> String {
