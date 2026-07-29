@@ -8,10 +8,16 @@ typeset -g SHAREZED_CHANNEL=@CHANNEL@
 typeset -gx SHAREZED_HEAD=@HEAD@
 typeset -gx SHAREZED_CONFLICTS=
 
+# Appended to RPROMPT while a reload is pending, unless SHAREZED_NO_NOTIFY.
+# The leading space is part of it so stripping puts your prompt back exactly.
+typeset -g _sharezed_segment=' %F{yellow}↻ sharezed reload%f'
+
 # A fresh shell has just run the bootstrap, so it already *is* the desired
 # state — start at head, not at 0. Exported so `sharezed status` can read it.
+# `2>/dev/null` cannot silence this: a failed *redirection* is reported by the
+# shell on its own stderr, before the redirect it would have been muted by.
 typeset -gx SHAREZED_CURSOR=0
-read -r SHAREZED_CURSOR 2>/dev/null < $SHAREZED_HEAD || SHAREZED_CURSOR=0
+[[ -r $SHAREZED_HEAD ]] && read -r SHAREZED_CURSOR < $SHAREZED_HEAD
 
 # Merge base for a list param the log has never carried before (§8.9): what
 # this shell had when the hook was installed.
@@ -82,8 +88,28 @@ _sharezed_apply() {
 
 _sharezed_precmd() {
   [[ -n $SHAREZED_DISABLE ]] && return 0
+  # A moved or uninstalled binary must go quiet, not report an exec failure on
+  # every prompt — which is what a default-on notify would otherwise do.
+  [[ -x $SHAREZED_BIN ]] || return 0
+  # Opt-in: publish your own config changes without typing `reload`. Costs a
+  # fork and ~6ms per prompt, which is invisible — the reason it is off by
+  # default is that it makes pressing enter a publish action, so a half-saved
+  # zshrc reaches every shell at whatever moment you next hit a prompt.
+  [[ -n $SHAREZED_AUTORELOAD ]] &&
+    $SHAREZED_BIN reload --channel $SHAREZED_CHANNEL --silent
+  # On by default: forgetting to reload is the failure mode this exists for.
+  # Same fork as autoreload, but it only looks — the human still decides when
+  # to publish. Strip first, then re-add: idempotent across prompts, and it
+  # picks up an RPROMPT your config sets *after* the hook line without saving
+  # a copy. No promptsubst needed — precmd runs before the prompt is rendered.
+  if [[ -z $SHAREZED_NO_NOTIFY ]]; then
+    RPROMPT=${RPROMPT%"$_sharezed_segment"}
+    $SHAREZED_BIN reload --channel $SHAREZED_CHANNEL --check --silent ||
+      RPROMPT+=$_sharezed_segment
+  fi
+  [[ -r $SHAREZED_HEAD ]] || return 0
   local head
-  read -r head 2>/dev/null < $SHAREZED_HEAD || return 0
+  read -r head < $SHAREZED_HEAD || return 0
   [[ $head == $SHAREZED_CURSOR ]] && return 0
   if ! _sharezed_apply; then
     # ponytail: quarantine after one failure, not N. A poison entry costs a

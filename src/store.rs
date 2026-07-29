@@ -1,4 +1,4 @@
-//! The append-only log (PRD §7.3) and its trust checks (§7.7).
+//! The append-only log (PRD §7.3), and the uid/mode checks on it (§7.7).
 
 use crate::state::{self, Change, State};
 use serde::{Deserialize, Serialize};
@@ -16,15 +16,13 @@ const SNAPSHOT_EVERY: u64 = 20;
 
 #[derive(Serialize, Deserialize, Default)]
 pub struct Meta {
-    #[serde(default)]
-    pub bootstrap: String,
-    /// Every file the bootstrap sourced, path -> sha256. The trust gate (§7.7)
-    /// compares the whole set: editing a sourced file has to trip it too.
+    /// Every file the bootstrap sourced, path -> sha256. Lets `reload` skip the
+    /// capture when nothing moved, and `doctor` say what did.
     #[serde(default)]
     pub sources: std::collections::BTreeMap<String, String>,
     /// External commands the bootstrap ran, path -> fingerprint. Upgrading one
     /// changes what the zshrc produces (`flux completion zsh`) without touching
-    /// a single file, so this is a staleness signal, not a review gate.
+    /// a single file you own.
     #[serde(default)]
     pub commands: std::collections::BTreeMap<String, String>,
 }
@@ -49,7 +47,14 @@ impl Store {
         if md.mode() & 0o077 != 0 {
             return Err(format!("{} is group/world accessible", dir.display()).into());
         }
-        Ok(Store { dir })
+        let store = Store { dir };
+        // A channel with nothing published still needs its `head`: the hook
+        // reads it on every prompt, and a missing file is a redirection error
+        // zsh prints no matter how it is redirected.
+        if !store.head_path().exists() {
+            write_atomic(&store.head_path(), b"0\n")?;
+        }
+        Ok(store)
     }
 
     pub fn head_path(&self) -> PathBuf {

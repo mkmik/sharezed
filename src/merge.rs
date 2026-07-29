@@ -32,28 +32,25 @@ fn dedup(v: &[String]) -> Vec<String> {
     v.iter().filter(|e| seen.insert(norm(e))).cloned().collect()
 }
 
-/// Indices into `ours` that survive from `base` in the same relative order.
-fn lcs_anchors(base: &[String], ours: &[String]) -> HashSet<usize> {
-    let (nb, no) = (base.len(), ours.len());
-    let (b, o): (Vec<_>, Vec<_>) = (
-        base.iter().map(|s| norm(s)).collect(),
-        ours.iter().map(|s| norm(s)).collect(),
-    );
-    // ponytail: O(n²) LCS. n is 20–60 for a PATH, so ~3600 ops — free.
-    let mut dp = vec![vec![0usize; no + 1]; nb + 1];
-    for i in (0..nb).rev() {
-        for j in (0..no).rev() {
-            dp[i][j] = if b[i] == o[j] {
+/// Matched index pairs of the longest common subsequence, in order. Exact
+/// equality — callers that want fuzzier matching pass normalized copies.
+pub fn lcs(a: &[String], b: &[String]) -> Vec<(usize, usize)> {
+    let (na, nb) = (a.len(), b.len());
+    // ponytail: O(n²). n is 20–60 for a PATH, so ~3600 ops — free.
+    let mut dp = vec![vec![0usize; nb + 1]; na + 1];
+    for i in (0..na).rev() {
+        for j in (0..nb).rev() {
+            dp[i][j] = if a[i] == b[j] {
                 dp[i + 1][j + 1] + 1
             } else {
                 dp[i + 1][j].max(dp[i][j + 1])
             };
         }
     }
-    let (mut i, mut j, mut anchors) = (0, 0, HashSet::new());
-    while i < nb && j < no {
-        if b[i] == o[j] {
-            anchors.insert(j);
+    let (mut i, mut j, mut out) = (0, 0, Vec::new());
+    while i < na && j < nb {
+        if a[i] == b[j] {
+            out.push((i, j));
             i += 1;
             j += 1;
         } else if dp[i + 1][j] >= dp[i][j + 1] {
@@ -62,7 +59,16 @@ fn lcs_anchors(base: &[String], ours: &[String]) -> HashSet<usize> {
             j += 1;
         }
     }
-    anchors
+    out
+}
+
+/// Indices into `ours` that survive from `base` in the same relative order.
+fn lcs_anchors(base: &[String], ours: &[String]) -> HashSet<usize> {
+    let (b, o): (Vec<_>, Vec<_>) = (
+        base.iter().map(|s| norm(s)).collect(),
+        ours.iter().map(|s| norm(s)).collect(),
+    );
+    lcs(&b, &o).into_iter().map(|(_, j)| j).collect()
 }
 
 pub struct Merged {

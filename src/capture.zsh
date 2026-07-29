@@ -12,6 +12,16 @@ typeset -ga _sz_deny=(
   TRAPEXIT TRAPINT TRAPTERM TRAPHUP TRAPQUIT TRAPUSR1 TRAPUSR2
 )
 
+# Three namespaces. `_sharezed_*` is sharezed's own: synced, and theirs-wins
+# at apply time, which is how a hook change reaches a running shell.
+# `SHAREZED_*` is configuration you wrote: synced like any other variable.
+# The list below is genuinely per-shell and never syncs — a cursor, a conflict
+# list, the path this shell started with, the channel it subscribed to.
+typeset -ga _sz_hook_state=(
+  SHAREZED_BIN SHAREZED_CHANNEL SHAREZED_HEAD SHAREZED_CURSOR
+  SHAREZED_CONFLICTS SHAREZED_PATH0 SHAREZED_DISABLE
+)
+
 # "Skip special params" is too aggressive — PATH is special (§5.4a).
 _sz_allowed_special() {
   [[ $1 == (PATH|path|FPATH|fpath|MANPATH|manpath|CDPATH|cdpath) ]]
@@ -32,7 +42,14 @@ _sz_dump() {
   local -a v
   for name attrs in ${(kv)parameters}; do
     (( ${_sz_deny[(Ie)$name]} )) && continue
-    [[ $name == (SHAREZED_*|_sharezed_*|_sz_*|SZ_OUT*|SZ_BOOT) ]] && continue
+    # Only the hook's *own* per-shell state is excluded (§5.3) — a shared
+    # cursor or head is nonsense. The rest of the namespace is configuration
+    # you wrote (SHAREZED_NOTIFY, SHAREZED_AUTORELOAD, …) and propagates like
+    # anything else. SHAREZED_DISABLE stays out on purpose: a synced kill
+    # switch would disable every shell, leaving nothing able to apply its
+    # removal (G7).
+    (( ${_sz_hook_state[(Ie)$name]} )) && continue
+    [[ $name == (_sz_*|SZ_*) ]] && continue
     # Completion-system state is an explicit non-goal (§3), and it is most of
     # what a compinit'd shell holds: 1498 of 1511 functions on a real zshrc.
     [[ $name == (_comp*|_patcomps|_postpatcomps|_services|_lastcomp|comppostfuncs|compprefuncs) ]] && continue
@@ -56,7 +73,9 @@ _sz_dump() {
 
   for name in ${(k)functions}; do
     # `_*` is zsh's convention for completion functions — out of scope (§3).
-    [[ $name == _* ]] && continue
+    # sharezed's own are the exception: they are ordinary functions your config
+    # defined, and syncing them is how a hook change reaches a running shell.
+    [[ $name == _* && $name != _sharezed_* ]] && continue
     # An autoloadable function is recorded by *presence*, never by body:
     # whether it has been called yet is a lazy-loading detail, and letting it
     # into the state makes every "did anything call zmv this run" a phantom diff.
@@ -106,6 +125,16 @@ _sz_untrace() {
   done
 }
 
+# With no explicit bootstrap, run the startup sequence zsh itself would run.
+# Verified byte-identical to `zsh -l -i` on a real config — and it is the only
+# way to see ~/.zshenv, which is where `~/.cargo/bin` actually comes from.
+typeset -ga _sz_startup=(
+  /etc/zshenv  ${ZDOTDIR:-$HOME}/.zshenv
+  /etc/zprofile ${ZDOTDIR:-$HOME}/.zprofile
+  /etc/zshrc   ${ZDOTDIR:-$HOME}/.zshrc
+  /etc/zlogin  ${ZDOTDIR:-$HOME}/.zlogin
+)
+
 _sz_dump >| $SZ_OUT0
 # SOURCE_TRACE names every file the bootstrap loads; XTRACE names every command
 # it runs — including inside `$(…)` and `<(…)`, which fork and so never reach
@@ -115,7 +144,18 @@ _sz_dump >| $SZ_OUT0
 setopt sourcetrace xtrace
 # unsetopt goes inside: outside the redirect it would trace itself onto the
 # caller's stderr.
-{ { [[ -n $SZ_BOOT ]] && source $SZ_BOOT }; unsetopt xtrace sourcetrace } 2>| $SZ_TRACE
+# A `{ }` block, never a function: inside a function `typeset -a foo=(…)` in a
+# zshrc would declare a *local* and vanish with the frame (§5.4d).
+{
+  if [[ -n $SZ_BOOT ]]; then
+    source $SZ_BOOT
+  else
+    for _sz_f in $_sz_startup; do
+      [[ -r $_sz_f ]] && source $_sz_f
+    done
+  fi
+  unsetopt xtrace sourcetrace
+} 2>| $SZ_TRACE
 _sz_untrace < $SZ_TRACE
 _sz_dump >| $SZ_OUT1
 return 0
