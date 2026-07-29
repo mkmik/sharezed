@@ -753,7 +753,8 @@ mod tests {
         std::fs::write(
             &boot,
             "export EDITOR=acme\nMYTOKEN=sekrit\nalias gs='git status'\n\
-             work() { print \"working in $1\" }\ntypeset -a mylist=(a b)\npath=(/opt/x $path)\n",
+             work() { print \"working in $1\" }\ntypeset -a mylist=(a b)\npath=(/opt/x $path)\n\
+             export SHAREZED_NOTIFY=1\nexport SHAREZED_CURSOR=99\n",
         )
         .unwrap();
         let cap = capture::clean_room(Some(&boot)).unwrap();

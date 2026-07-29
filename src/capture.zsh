@@ -12,6 +12,11 @@ typeset -ga _sz_deny=(
   TRAPEXIT TRAPINT TRAPTERM TRAPHUP TRAPQUIT TRAPUSR1 TRAPUSR2
 )
 
+typeset -ga _sz_hook_state=(
+  SHAREZED_BIN SHAREZED_CHANNEL SHAREZED_HEAD SHAREZED_CURSOR
+  SHAREZED_CONFLICTS SHAREZED_PATH0 SHAREZED_SEGMENT SHAREZED_DISABLE
+)
+
 # "Skip special params" is too aggressive — PATH is special (§5.4a).
 _sz_allowed_special() {
   [[ $1 == (PATH|path|FPATH|fpath|MANPATH|manpath|CDPATH|cdpath) ]]
@@ -32,7 +37,14 @@ _sz_dump() {
   local -a v
   for name attrs in ${(kv)parameters}; do
     (( ${_sz_deny[(Ie)$name]} )) && continue
-    [[ $name == (SHAREZED_*|_sharezed_*|_sz_*|SZ_*) ]] && continue
+    # Only the hook's *own* per-shell state is excluded (§5.3) — a shared
+    # cursor or head is nonsense. The rest of the namespace is configuration
+    # you wrote (SHAREZED_NOTIFY, SHAREZED_AUTORELOAD, …) and propagates like
+    # anything else. SHAREZED_DISABLE stays out on purpose: a synced kill
+    # switch would disable every shell, leaving nothing able to apply its
+    # removal (G7).
+    (( ${_sz_hook_state[(Ie)$name]} )) && continue
+    [[ $name == (_sharezed_*|_sz_*|SZ_*) ]] && continue
     # Completion-system state is an explicit non-goal (§3), and it is most of
     # what a compinit'd shell holds: 1498 of 1511 functions on a real zshrc.
     [[ $name == (_comp*|_patcomps|_postpatcomps|_services|_lastcomp|comppostfuncs|compprefuncs) ]] && continue
