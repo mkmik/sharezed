@@ -42,9 +42,6 @@ WARN 1 of 8 traced command(s) changed since the last publish
        run `sharezed reload` to pick up what they now produce
 ```
 
-`doctor` also reports how many files arrived by process substitution
-(`. <(cmd)`), which can't be hashed at all.
-
 Under 16 KB a command is a script and gets content-hashed; above that its
 symlink target, size and mtime are enough — package managers put the version
 in the target (`flux -> ../Cellar/flux/2.1.0/bin/flux`), and content-hashing

@@ -253,13 +253,6 @@ fn fingerprints(files: &[PathBuf]) -> std::collections::BTreeMap<String, String>
         .collect()
 }
 
-fn unhashable(files: &[PathBuf]) -> usize {
-    files
-        .iter()
-        .filter(|f| f.starts_with("/dev/") || !f.is_file())
-        .count()
-}
-
 /// `~ path` changed, `+ path` newly sourced, `- path` no longer sourced.
 fn changed_sources(
     was: &std::collections::BTreeMap<String, String>,
@@ -608,19 +601,6 @@ fn doctor(channel: &str, prune_missing: bool) -> R {
             ));
             lines.extend(changed.iter().map(|c| ("", c.trim().to_string())));
         }
-    }
-
-    // Permanent and unactionable on any config that uses `. <(cmd)`, so it must
-    // not be a warning: the command that produced it *is* fingerprinted above.
-    let opaque = unhashable(&first.sources);
-    if opaque > 0 {
-        lines.push((
-            "note",
-            format!(
-                "{} sourced by process substitution; content untracked, but the command is",
-                plural(opaque, "file")
-            ),
-        ));
     }
 
     if prune_missing {
