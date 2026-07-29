@@ -1,0 +1,18 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 284 180" width="284" height="180" role="img" aria-labelledby="t">
+  <title id="t">sharezed — 0b1001 nights</title>
+
+  <!-- four nights, lit or dark: 1 0 0 1 -->
+  <g fill="#e2a63c">
+    <path transform="translate(48,46)" d="M10.17,-23.93 A26,26 0 1 0 10.17,23.93 A24,24 0 0 1 10.17,-23.93Z"/>
+    <path transform="translate(236,46) scale(-1,1)" d="M10.17,-23.93 A26,26 0 1 0 10.17,23.93 A24,24 0 0 1 10.17,-23.93Z"/>
+  </g>
+  <g fill="none" stroke="#e2a63c" stroke-width="3" opacity=".62">
+    <circle cx="108" cy="46" r="24"/>
+    <circle cx="176" cy="46" r="24"/>
+  </g>
+
+  <g fill="#7f8489" text-anchor="middle" font-family="ui-monospace, SFMono-Regular, Menlo, Consolas, monospace">
+    <text x="142" y="128" font-size="50" font-weight="500">sharezed</text>
+    <text x="142" y="160" font-size="17" letter-spacing="1.5" opacity=".8">0b1001 nights</text>
+  </g>
+</svg>
