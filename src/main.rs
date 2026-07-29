@@ -87,6 +87,12 @@ fn main() {
 
 fn run(cli: &Cli) -> R {
     let ch = &cli.channel;
+    // Any invocation of a new binary is how running shells find out its hook
+    // moved, so record it whatever the subcommand was. Best-effort: a store
+    // that cannot be opened is the subcommand's problem to report.
+    if let Ok(s) = Store::open(ch) {
+        let _ = s.note_hook_version(&hook_version());
+    }
     match &cli.command {
         Cmd::Reload {
             force,
@@ -166,7 +172,6 @@ fn reload(channel: &str, force: bool, silent: bool, check: bool) -> R {
         }
     };
     let store = Store::open(channel)?;
-    store.note_hook_version(&hook_version())?;
     if check {
         // Deliberately before the lock: this runs on every prompt in every
         // shell, and an exclusive flock there would serialize all of them.
@@ -371,7 +376,6 @@ fn revert(channel: &str, seq: u64) -> R {
 
 fn export(channel: &str, cursor: u64) -> R {
     let store = Store::open(channel)?;
-    store.note_hook_version(&hook_version())?;
     let head = store.head();
     let mut buf = Vec::new();
     std::io::stdin().read_to_end(&mut buf)?;
@@ -398,7 +402,6 @@ fn hook_version() -> String {
 
 fn hook(channel: &str) -> R {
     let store = Store::open(channel)?;
-    store.note_hook_version(&hook_version())?;
     let bin = std::env::current_exe()?;
     print!(
         "{}",
