@@ -8,7 +8,7 @@ typeset -g SHAREZED_CHANNEL=@CHANNEL@
 typeset -gx SHAREZED_HEAD=@HEAD@
 typeset -gx SHAREZED_CONFLICTS=
 
-# Appended to RPROMPT while a reload is pending, when SHAREZED_NOTIFY is set.
+# Appended to RPROMPT while a reload is pending, unless SHAREZED_NO_NOTIFY.
 # The leading space is part of it so stripping puts your prompt back exactly.
 typeset -g _sharezed_segment=' %F{yellow}↻ sharezed reload%f'
 
@@ -88,17 +88,21 @@ _sharezed_apply() {
 
 _sharezed_precmd() {
   [[ -n $SHAREZED_DISABLE ]] && return 0
+  # A moved or uninstalled binary must go quiet, not report an exec failure on
+  # every prompt — which is what a default-on notify would otherwise do.
+  [[ -x $SHAREZED_BIN ]] || return 0
   # Opt-in: publish your own config changes without typing `reload`. Costs a
   # fork and ~6ms per prompt, which is invisible — the reason it is off by
   # default is that it makes pressing enter a publish action, so a half-saved
   # zshrc reaches every shell at whatever moment you next hit a prompt.
   [[ -n $SHAREZED_AUTORELOAD ]] &&
     $SHAREZED_BIN reload --channel $SHAREZED_CHANNEL --silent
-  # Same fork, but it only looks: the human still decides when to publish.
-  # Strip first, then re-add: idempotent across prompts, and it picks up an
-  # RPROMPT your config sets *after* the hook line without saving a copy.
-  # No promptsubst needed — precmd runs before the prompt is rendered.
-  if [[ -n $SHAREZED_NOTIFY ]]; then
+  # On by default: forgetting to reload is the failure mode this exists for.
+  # Same fork as autoreload, but it only looks — the human still decides when
+  # to publish. Strip first, then re-add: idempotent across prompts, and it
+  # picks up an RPROMPT your config sets *after* the hook line without saving
+  # a copy. No promptsubst needed — precmd runs before the prompt is rendered.
+  if [[ -z $SHAREZED_NO_NOTIFY ]]; then
     RPROMPT=${RPROMPT%"$_sharezed_segment"}
     $SHAREZED_BIN reload --channel $SHAREZED_CHANNEL --check --silent ||
       RPROMPT+=$_sharezed_segment

@@ -67,14 +67,16 @@ the pair is what belongs in a timer.
 
 ## Being told to reload
 
-One line, and you never have to remember:
+You never have to remember: the hook appends `↻ sharezed reload` to your
+`RPROMPT` while a capture has something to do, and takes it back off the moment
+you reload. On by default — forgetting is the failure mode it exists for.
 
 ```zsh
-export SHAREZED_NOTIFY=1
+export SHAREZED_NO_NOTIFY=1    # if you'd rather it left your prompt alone
 ```
 
-The hook appends `↻ sharezed reload` to your `RPROMPT` while a capture has
-something to do, and takes it back off the moment you reload. It strips before
+It costs one fork per prompt (2.5ms), so the steady state is no longer
+fork-free; that's the price of the reminder. It strips before
 it appends, so it's idempotent, it survives a prompt your config sets *after*
 the hook line, and it leaves anything else in `RPROMPT` untouched. No
 `promptsubst` — precmd runs before the prompt is rendered.
