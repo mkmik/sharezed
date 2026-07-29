@@ -84,6 +84,12 @@ _sharezed_apply() {
 
 _sharezed_precmd() {
   [[ -n $SHAREZED_DISABLE ]] && return 0
+  # Opt-in: publish your own config changes without typing `reload`. Costs a
+  # fork and ~6ms per prompt, which is invisible — the reason it is off by
+  # default is that it makes pressing enter a publish action, so a half-saved
+  # zshrc reaches every shell at whatever moment you next hit a prompt.
+  [[ -n $SHAREZED_AUTORELOAD ]] &&
+    $SHAREZED_BIN reload --channel $SHAREZED_CHANNEL --if-changed --silent
   [[ -r $SHAREZED_HEAD ]] || return 0
   local head
   read -r head < $SHAREZED_HEAD || return 0

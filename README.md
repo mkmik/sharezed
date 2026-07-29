@@ -60,7 +60,17 @@ gen 5 → gen 6: +1 function
 ```
 
 With `--silent` it prints nothing on success — errors still go to stderr — so
-the pair is what belongs in a timer.
+the pair is what belongs in a timer, or in the hook itself:
+
+```zsh
+export SHAREZED_AUTORELOAD=1   # publish your own edits without typing reload
+```
+
+Off by default. Not for the ~6ms it adds to a prompt, which is invisible, but
+because it makes pressing enter a publish action: a half-saved zshrc reaches
+every shell at whatever moment you next hit a prompt. Concurrency is safe —
+`reload` takes the channel lock before reading meta, so eight shells racing
+after one edit publish exactly one generation (verified).
 
 Files are compared by content, so `touch` alone doesn't trigger a capture.
 Adding a `source` line or a new command means editing a file that is already
