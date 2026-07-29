@@ -89,7 +89,7 @@ _sharezed_precmd() {
   # default is that it makes pressing enter a publish action, so a half-saved
   # zshrc reaches every shell at whatever moment you next hit a prompt.
   [[ -n $SHAREZED_AUTORELOAD ]] &&
-    $SHAREZED_BIN reload --channel $SHAREZED_CHANNEL --if-changed --silent
+    $SHAREZED_BIN reload --channel $SHAREZED_CHANNEL --silent
   [[ -r $SHAREZED_HEAD ]] || return 0
   local head
   read -r head < $SHAREZED_HEAD || return 0

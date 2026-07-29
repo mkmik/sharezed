@@ -28,9 +28,9 @@ struct Cli {
 enum Cmd {
     /// Clean-room capture of the bootstrap script; publish the delta.
     Reload {
-        /// Skip the capture entirely unless a tracked file or command changed.
+        /// Capture even if no tracked file or command changed.
         #[arg(long)]
-        if_changed: bool,
+        force: bool,
         /// Print nothing on success. Errors still go to stderr.
         #[arg(long)]
         silent: bool,
@@ -85,7 +85,7 @@ fn main() {
 fn run(cli: &Cli) -> R {
     let ch = &cli.channel;
     match &cli.command {
-        Cmd::Reload { if_changed, silent } => reload(ch, *if_changed, *silent),
+        Cmd::Reload { force, silent } => reload(ch, *force, *silent),
         Cmd::Status => status(ch),
         Cmd::Diff { seq } => diff(ch, *seq),
         Cmd::Log => log(ch),
@@ -159,7 +159,7 @@ fn cursor_env() -> u64 {
 
 // --- producer ---------------------------------------------------------------
 
-fn reload(channel: &str, if_changed: bool, silent: bool) -> R {
+fn reload(channel: &str, force: bool, silent: bool) -> R {
     // Errors keep going to stderr: silent is about routine chatter on a timer,
     // not about hiding a broken bootstrap.
     let say = |msg: String| {
@@ -180,8 +180,10 @@ fn reload(channel: &str, if_changed: bool, silent: bool) -> R {
     // Re-hashing what the last capture recorded needs no shell at all, so this
     // is milliseconds against a second-plus. Adding a new `source` line or a
     // new command means editing a file that is already tracked, so a change
-    // that matters always shows up here first.
-    if if_changed && !meta.sources.is_empty() {
+    // that matters always shows up here first. `--force` is for the rest: a
+    // bootstrap that reads a file it never sources, or a change to
+    // SHAREZED_IGNORE, moves no fingerprint.
+    if !force && !meta.sources.is_empty() {
         match stale_dep(&meta) {
             None => {
                 say(format!(

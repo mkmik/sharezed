@@ -47,17 +47,20 @@ symlink target, size and mtime are enough — package managers put the version
 in the target (`flux -> ../Cellar/flux/2.1.0/bin/flux`), and content-hashing
 your PATH would be 195 MB per reload for no extra signal.
 
-`reload --if-changed` re-hashes what the last capture recorded and does
-nothing unless something moved — no shell, **3ms against 1.1s**, so it is
-cheap enough for a timer:
+`reload` re-hashes what the last capture recorded and does nothing unless
+something moved — no shell, **3ms against 1.1s**:
 
 ```console
-$ sharezed reload --if-changed
+$ sharezed reload
 gen 5: 14 files and 10 commands unchanged
-$ sharezed reload --if-changed          # after editing ~/.zsh/zmac
+$ sharezed reload                       # after editing ~/.zsh/zmac
 changed: /Users/mkm/.zsh/zmac
 gen 5 → gen 6: +1 function
 ```
+
+`--force` captures anyway. Reach for it when nothing a fingerprint can see
+moved: a bootstrap that reads a file it never sources, or a change to
+`SHAREZED_IGNORE`.
 
 With `--silent` it prints nothing on success — errors still go to stderr — so
 the pair is what belongs in a timer, or in the hook itself:
