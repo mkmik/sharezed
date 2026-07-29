@@ -16,6 +16,12 @@ eval "$(direnv hook zsh)"
 
 ## Use
 
+`reload` captures the **zsh startup sequence** — `.zshenv`, `.zprofile`,
+`.zshrc` and everything they source — in a cleared environment. Not just
+`~/.zshrc`: `~/.zshenv` is usually where `~/.cargo/bin` comes from. Nothing the
+calling terminal injected can reach the capture, so reloading from two windows
+publishes the same state. `SHAREZED_BOOTSTRAP` captures one file instead.
+
 ```zsh
 $ vim ~/.zshrc                 # add a function, drop an alias, bump a var
 $ sharezed reload --allow
@@ -61,9 +67,6 @@ press enter. Not worth it.
 - `capture --from-current` (publish a live shell's state).
 - Real pty capture: `zsh -f -i -c` sets `interactive`, but ZLE-only config
   (`bindkey`, `zle -N`) still fails. PRD open question 1.
-- `reload` inherits the calling shell's `PATH` into the clean room, so local
-  prepends can leak into a publish. Check `sharezed diff` before `allow`.
-  Elements under `$TMPDIR` are dropped automatically — they are per-session by
-  construction, and a terminal that mints one per window (cmux does:
-  `$TMPDIR/cmux-cli-shims/$CMUX_PANEL_ID`) would otherwise churn a generation
-  on every reload from a different window. Extend with `SHAREZED_PATH_IGNORE`.
+- The hand-rolled startup sequence approximates zsh's own. Verified
+  byte-identical to `zsh -l -i` on a real config, but `ZDOTDIR` edge cases and
+  `/etc/zsh*` in unusual locations are untested.

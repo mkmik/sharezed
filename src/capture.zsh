@@ -32,7 +32,7 @@ _sz_dump() {
   local -a v
   for name attrs in ${(kv)parameters}; do
     (( ${_sz_deny[(Ie)$name]} )) && continue
-    [[ $name == (SHAREZED_*|_sharezed_*|_sz_*|SZ_OUT*|SZ_BOOT) ]] && continue
+    [[ $name == (SHAREZED_*|_sharezed_*|_sz_*|SZ_*) ]] && continue
     # Completion-system state is an explicit non-goal (§3), and it is most of
     # what a compinit'd shell holds: 1498 of 1511 functions on a real zshrc.
     [[ $name == (_comp*|_patcomps|_postpatcomps|_services|_lastcomp|comppostfuncs|compprefuncs) ]] && continue
@@ -106,6 +106,16 @@ _sz_untrace() {
   done
 }
 
+# With no explicit bootstrap, run the startup sequence zsh itself would run.
+# Verified byte-identical to `zsh -l -i` on a real config — and it is the only
+# way to see ~/.zshenv, which is where `~/.cargo/bin` actually comes from.
+typeset -ga _sz_startup=(
+  /etc/zshenv  ${ZDOTDIR:-$HOME}/.zshenv
+  /etc/zprofile ${ZDOTDIR:-$HOME}/.zprofile
+  /etc/zshrc   ${ZDOTDIR:-$HOME}/.zshrc
+  /etc/zlogin  ${ZDOTDIR:-$HOME}/.zlogin
+)
+
 _sz_dump >| $SZ_OUT0
 # SOURCE_TRACE names every file the bootstrap loads; XTRACE names every command
 # it runs — including inside `$(…)` and `<(…)`, which fork and so never reach
@@ -115,7 +125,18 @@ _sz_dump >| $SZ_OUT0
 setopt sourcetrace xtrace
 # unsetopt goes inside: outside the redirect it would trace itself onto the
 # caller's stderr.
-{ { [[ -n $SZ_BOOT ]] && source $SZ_BOOT }; unsetopt xtrace sourcetrace } 2>| $SZ_TRACE
+# A `{ }` block, never a function: inside a function `typeset -a foo=(…)` in a
+# zshrc would declare a *local* and vanish with the frame (§5.4d).
+{
+  if [[ -n $SZ_BOOT ]]; then
+    source $SZ_BOOT
+  else
+    for _sz_f in $_sz_startup; do
+      [[ -r $_sz_f ]] && source $_sz_f
+    done
+  fi
+  unsetopt xtrace sourcetrace
+} 2>| $SZ_TRACE
 _sz_untrace < $SZ_TRACE
 _sz_dump >| $SZ_OUT1
 return 0

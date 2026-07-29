@@ -101,10 +101,26 @@ fn run(cli: &Cli) -> R {
 // ponytail: env vars, no config file. The PRD's TOML (§8.4, §8.7) buys a parser
 // dependency for values nobody has needed to change yet.
 
-fn bootstrap() -> PathBuf {
-    std::env::var_os("SHAREZED_BOOTSTRAP")
+/// `None` means the startup files zsh itself would run, in order — which is
+/// the only way to see `~/.zshenv`, where a PATH entry like `~/.cargo/bin`
+/// usually comes from. Set SHAREZED_BOOTSTRAP to capture one file instead.
+fn bootstrap() -> Option<PathBuf> {
+    std::env::var_os("SHAREZED_BOOTSTRAP").map(PathBuf::from)
+}
+
+fn describe_bootstrap(b: &Option<PathBuf>) -> String {
+    match b {
+        Some(p) => p.display().to_string(),
+        None => "the zsh startup files".into(),
+    }
+}
+
+/// Where the hook belongs, regardless of what is being captured.
+fn zshrc() -> PathBuf {
+    std::env::var_os("ZDOTDIR")
         .map(PathBuf::from)
-        .unwrap_or_else(|| store::home().join(".zshrc"))
+        .unwrap_or_else(store::home)
+        .join(".zshrc")
 }
 
 /// Matched keys are dropped at capture time and never enter the log (§7.2).
@@ -147,17 +163,15 @@ fn reload(channel: &str, allow_flag: bool) -> R {
     let store = Store::open(channel)?;
     let _lock = store.lock()?;
     let boot = bootstrap();
-    if !boot.is_file() {
-        return Err(format!(
-            "bootstrap {} is not a file (set SHAREZED_BOOTSTRAP)",
-            boot.display()
-        )
-        .into());
+    if let Some(b) = &boot
+        && !b.is_file()
+    {
+        return Err(format!("bootstrap {} is not a file", b.display()).into());
     }
 
     // The file list comes out of the capture itself, so the trust gate has to
     // run after it. Capture is not the dangerous step — publishing is.
-    let cap = capture::clean_room(&boot)?;
+    let cap = capture::clean_room(boot.as_deref())?;
     let sources = hash_sources(&cap.sources);
     let mut meta = store.meta();
     let changed = changed_sources(&meta.sources, &sources);
@@ -175,7 +189,7 @@ fn reload(channel: &str, allow_flag: bool) -> R {
     let head = store.head();
     let changes = state::diff(&store.desired(head)?, &desired);
 
-    meta.bootstrap = boot.to_string_lossy().into_owned();
+    meta.bootstrap = describe_bootstrap(&boot);
     meta.sources = sources;
     meta.commands = fingerprints(&cap.commands);
     store.save_meta(&meta)?;
@@ -218,13 +232,13 @@ fn allow(channel: &str) -> R {
     let store = Store::open(channel)?;
     let boot = bootstrap();
     let mut meta = store.meta();
-    meta.bootstrap = boot.to_string_lossy().into_owned();
-    let cap = capture::clean_room(&boot)?;
+    meta.bootstrap = describe_bootstrap(&boot);
+    let cap = capture::clean_room(boot.as_deref())?;
     meta.sources = hash_sources(&cap.sources);
     meta.commands = fingerprints(&cap.commands);
     let n = meta.sources.len();
     store.save_meta(&meta)?;
-    println!("trusted {} and {} sourced file(s)", boot.display(), n - 1);
+    println!("trusted {} — {n} file(s)", describe_bootstrap(&boot));
     Ok(())
 }
 
@@ -542,12 +556,13 @@ fn doctor(channel: &str, prune_missing: bool) -> R {
     };
 
     let boot = bootstrap();
-    let rc = std::fs::read_to_string(&boot).unwrap_or_default();
+    let rc_path = zshrc();
+    let rc = std::fs::read_to_string(&rc_path).unwrap_or_default();
     let pos = |needle: &str| rc.lines().position(|l| l.contains(needle));
     match (pos("sharezed hook"), pos("direnv hook")) {
         (None, _) => check(
             false,
-            &format!("no `sharezed hook zsh` in {}", boot.display()),
+            &format!("no `sharezed hook zsh` in {}", rc_path.display()),
         ),
         (Some(s), Some(d)) => check(
             s < d,
@@ -575,7 +590,7 @@ fn doctor(channel: &str, prune_missing: bool) -> R {
     // function of its text, and every flip publishes a phantom generation.
     // Only catches a flip whose trigger is armed right now.
     let ignore = ignore_globs();
-    let capture_twice = || -> R<capture::Capture> { capture::clean_room(&boot) };
+    let capture_twice = || -> R<capture::Capture> { capture::clean_room(boot.as_deref()) };
     let (first, second) = (capture_twice()?, capture_twice()?);
     let volatile = volatile_globs();
     let effect = |c: &capture::Capture| {
@@ -702,7 +717,7 @@ mod tests {
              work() { print \"working in $1\" }\ntypeset -a mylist=(a b)\npath=(/opt/x $path)\n",
         )
         .unwrap();
-        let cap = capture::clean_room(&boot).unwrap();
+        let cap = capture::clean_room(Some(&boot)).unwrap();
         let d = state::effect(&cap.s0, &cap.s1, &[glob::Pattern::new("*TOKEN*").unwrap()]);
         assert!(
             cap.sources.contains(&boot),

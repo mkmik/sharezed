@@ -20,13 +20,28 @@ pub struct Capture {
 /// `interactive`, so `[[ -o interactive ]]` guards run; ZLE-dependent config
 /// (`bindkey`, `zle -N`) still fails and prints to stderr. Upgrade to `zsh/zpty`
 /// or a host pty if a real zshrc trips on it — that is PRD open question 1.
-pub fn clean_room(bootstrap: &Path) -> R<Capture> {
+/// `bootstrap: None` runs the startup files zsh itself would, in order.
+pub fn clean_room(bootstrap: Option<&Path>) -> R<Capture> {
     let dir = std::env::temp_dir().join(format!("sharezed-{}", std::process::id()));
     fs::create_dir_all(&dir)?;
     let f = |n: &str| dir.join(n);
     fs::write(f("capture.zsh"), include_str!("capture.zsh"))?;
 
-    let status = Command::new("zsh")
+    // Isolated: the capture must be a function of your config, not of whatever
+    // the calling terminal injected. cmux mints a per-panel PATH entry; a
+    // multiplexer or an agent adds its own. Only what a login shell is
+    // guaranteed gets through. PATH here is just enough to find zsh —
+    // /etc/zprofile's path_helper replaces it a moment later.
+    let mut cmd = Command::new("zsh");
+    cmd.env_clear().env("PATH", "/usr/bin:/bin:/usr/sbin:/sbin");
+    for k in [
+        "HOME", "USER", "LOGNAME", "SHELL", "TERM", "LANG", "LC_ALL", "TMPDIR", "ZDOTDIR",
+    ] {
+        if let Some(v) = std::env::var_os(k) {
+            cmd.env(k, v);
+        }
+    }
+    let status = cmd
         .args(["-f", "-i", "-c"])
         .arg(format!(
             "source {}",
@@ -37,7 +52,7 @@ pub fn clean_room(bootstrap: &Path) -> R<Capture> {
         .env("SZ_SRC", f("src"))
         .env("SZ_CMDS", f("cmds"))
         .env("SZ_TRACE", f("trace"))
-        .env("SZ_BOOT", bootstrap)
+        .env("SZ_BOOT", bootstrap.unwrap_or(Path::new("")))
         .stdin(Stdio::null())
         .stdout(Stdio::null())
         .status()?;
