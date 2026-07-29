@@ -16,6 +16,9 @@ jobs:
       - uses: dtolnay/rust-toolchain@stable
         with:
           components: clippy, rustfmt
+      # The capture harness and the hook are zsh; without this their tests
+      # skip and CI silently covers none of it.
+      - run: sudo apt-get update -qq && sudo apt-get install -qq -y zsh
       - run: cargo fmt --check
       - run: cargo clippy --all-targets -- -D warnings
       - run: cargo test

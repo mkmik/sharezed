@@ -720,10 +720,19 @@ mod tests {
         assert!(element_diff(&v(&["/a"]), &v(&["/a"]))[0].contains("attributes changed"));
     }
 
+    /// Every shell-level test needs one; a dev machine without zsh should skip
+    /// rather than fail. CI installs it, so there they all run.
+    fn has_zsh() -> bool {
+        Command::new("zsh").arg("-fc").arg("true").status().is_ok()
+    }
+
     /// A channel with nothing published must not make every prompt print an
     /// error. Shell-level, so no amount of Rust testing would have caught it.
     #[test]
     fn hook_is_silent_when_head_is_missing() {
+        if !has_zsh() {
+            return;
+        }
         let head = std::env::temp_dir().join("sharezed-no-such-head");
         let _ = std::fs::remove_file(&head);
         let hook = include_str!("hook.zsh")
@@ -746,7 +755,7 @@ mod tests {
     /// see exactly what it added. Needs zsh; skipped if absent.
     #[test]
     fn clean_room_captures_what_the_bootstrap_did() {
-        if Command::new("zsh").arg("-fc").arg("true").status().is_err() {
+        if !has_zsh() {
             return;
         }
         let boot = std::env::temp_dir().join(format!("sharezed-test-{}.zsh", std::process::id()));
