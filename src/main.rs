@@ -27,11 +27,7 @@ struct Cli {
 #[derive(Subcommand)]
 enum Cmd {
     /// Clean-room capture of the bootstrap script; publish the delta.
-    Reload {
-        /// Trust a changed bootstrap script without a separate `allow`.
-        #[arg(long)]
-        allow: bool,
-    },
+    Reload,
     /// Cursor vs head, pending entries, conflicts.
     Status,
     /// Human-readable view of an entry (default: the newest).
@@ -50,8 +46,6 @@ enum Cmd {
         #[arg(value_parser = ["zsh"])]
         shell: String,
     },
-    /// Trust the current content of the bootstrap script.
-    Allow,
     /// Publish the inverse of an entry.
     Revert { seq: u64 },
     /// Show how this shell's PATH was merged.
@@ -84,13 +78,12 @@ fn main() {
 fn run(cli: &Cli) -> R {
     let ch = &cli.channel;
     match &cli.command {
-        Cmd::Reload { allow } => reload(ch, *allow),
+        Cmd::Reload => reload(ch),
         Cmd::Status => status(ch),
         Cmd::Diff { seq } => diff(ch, *seq),
         Cmd::Log => log(ch),
         Cmd::Export { cursor, .. } => export(ch, *cursor),
         Cmd::Hook { .. } => hook(ch),
-        Cmd::Allow => allow(ch),
         Cmd::Revert { seq } => revert(ch, *seq),
         Cmd::Path { .. } => path_explain(ch),
         Cmd::Doctor { prune_missing } => doctor(ch, *prune_missing),
@@ -159,7 +152,7 @@ fn cursor_env() -> u64 {
 
 // --- producer ---------------------------------------------------------------
 
-fn reload(channel: &str, allow_flag: bool) -> R {
+fn reload(channel: &str) -> R {
     let store = Store::open(channel)?;
     let _lock = store.lock()?;
     let boot = bootstrap();
@@ -169,20 +162,9 @@ fn reload(channel: &str, allow_flag: bool) -> R {
         return Err(format!("bootstrap {} is not a file", b.display()).into());
     }
 
-    // The file list comes out of the capture itself, so the trust gate has to
-    // run after it. Capture is not the dangerous step — publishing is.
     let cap = capture::clean_room(boot.as_deref())?;
     let sources = hash_sources(&cap.sources);
     let mut meta = store.meta();
-    let changed = changed_sources(&meta.sources, &sources);
-    if !meta.sources.is_empty() && !changed.is_empty() && !allow_flag {
-        return Err(format!(
-            "{} sourced file(s) changed since the last publish:\n{}\n  review, then: sharezed allow   (or: sharezed reload --allow)",
-            changed.len(),
-            changed.join("\n")
-        )
-        .into());
-    }
 
     let mut desired = state::effect(&cap.s0, &cap.s1, &ignore_globs());
     state::drop_volatile(&mut desired, &volatile_globs());
@@ -222,23 +204,6 @@ fn validate(changes: &[state::Change]) -> R {
         )
         .into());
     }
-    Ok(())
-}
-
-/// Trust the current content of every file the bootstrap sources. Needs its own
-/// capture to learn the file list — rare command, so the second clean-room run
-/// is cheaper than carrying pending state between invocations.
-fn allow(channel: &str) -> R {
-    let store = Store::open(channel)?;
-    let boot = bootstrap();
-    let mut meta = store.meta();
-    meta.bootstrap = describe_bootstrap(&boot);
-    let cap = capture::clean_room(boot.as_deref())?;
-    meta.sources = hash_sources(&cap.sources);
-    meta.commands = fingerprints(&cap.commands);
-    let n = meta.sources.len();
-    store.save_meta(&meta)?;
-    println!("trusted {} — {n} file(s)", describe_bootstrap(&boot));
     Ok(())
 }
 

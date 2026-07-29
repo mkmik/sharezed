@@ -24,18 +24,16 @@ publishes the same state. `SHAREZED_BOOTSTRAP` captures one file instead.
 
 ```zsh
 $ vim ~/.zshrc                 # add a function, drop an alias, bump a var
-$ sharezed reload --allow
+$ sharezed reload
   gen 7 → gen 8: +2 functions, ~1 param, -1 alias
 # every other terminal converges at its next prompt
 ```
 
-`--allow` is the trust gate. It covers **every file your zshrc sources**, not
-just the one file — `SOURCE_TRACE` collects the list during capture and each
-one is hashed. `doctor` reports which changed, and how many arrived by process
-substitution (`. <(cmd)`), which can't be hashed or reviewed at all.
-
-Capture also fingerprints **every external command the bootstrap ran**, so
-`brew upgrade flux` shows up even though no file you own changed:
+`reload` never asks permission — it's your own config, and a prompt you always
+answer yes to isn't a safety feature. What it does instead is *notice*. Every
+sourced file is hashed and every external command the bootstrap ran is
+fingerprinted, so `brew upgrade flux` shows up even though no file you own
+changed:
 
 ```console
 $ sharezed doctor
@@ -43,6 +41,9 @@ WARN 1 of 8 traced command(s) changed since the last publish
        ~ /opt/homebrew/bin/flux
        run `sharezed reload` to pick up what they now produce
 ```
+
+`doctor` also reports how many files arrived by process substitution
+(`. <(cmd)`), which can't be hashed at all.
 
 Under 16 KB a command is a script and gets content-hashed; above that its
 symlink target, size and mtime are enough — package managers put the version
