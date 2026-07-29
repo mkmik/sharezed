@@ -116,12 +116,19 @@ press enter. Not worth it.
 
 ## Upgrading
 
-The hook's own functions are captured and published like any others, so a new
-hook reaches running shells through the ordinary apply path — no separate
-mechanism. They're applied last in an entry, so the guards for everything else
-run on one consistent version of the machinery, and they're theirs-wins: a
-shell holding the hook its own zshrc installed would otherwise read as a local
-edit and keep an old hook forever.
+Three namespaces, one rule each:
+
+| | synced | on conflict |
+|---|---|---|
+| `_sharezed_*` — sharezed's own hook | yes | theirs-wins |
+| `SHAREZED_*` — configuration you wrote | yes | ours-wins |
+| cursor, conflicts, channel, `$path` at install | never | — |
+
+So a new hook reaches running shells through the ordinary apply path, with no
+separate mechanism. Its functions are applied last in an entry, so the guards
+for everything else run on one consistent version of the machinery. Theirs-wins
+is what makes it work at all: a shell holding the hook its own zshrc installed
+would otherwise read as a local edit and keep an old hook forever.
 
 Shells started before this existed need one nudge, then they're autonomous:
 

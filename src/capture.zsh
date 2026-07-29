@@ -12,9 +12,14 @@ typeset -ga _sz_deny=(
   TRAPEXIT TRAPINT TRAPTERM TRAPHUP TRAPQUIT TRAPUSR1 TRAPUSR2
 )
 
+# Three namespaces. `_sharezed_*` is sharezed's own: synced, and theirs-wins
+# at apply time, which is how a hook change reaches a running shell.
+# `SHAREZED_*` is configuration you wrote: synced like any other variable.
+# The list below is genuinely per-shell and never syncs — a cursor, a conflict
+# list, the path this shell started with, the channel it subscribed to.
 typeset -ga _sz_hook_state=(
   SHAREZED_BIN SHAREZED_CHANNEL SHAREZED_HEAD SHAREZED_CURSOR
-  SHAREZED_CONFLICTS SHAREZED_PATH0 SHAREZED_SEGMENT SHAREZED_DISABLE
+  SHAREZED_CONFLICTS SHAREZED_PATH0 SHAREZED_DISABLE
 )
 
 # "Skip special params" is too aggressive — PATH is special (§5.4a).
@@ -44,7 +49,7 @@ _sz_dump() {
     # switch would disable every shell, leaving nothing able to apply its
     # removal (G7).
     (( ${_sz_hook_state[(Ie)$name]} )) && continue
-    [[ $name == (_sharezed_*|_sz_*|SZ_*) ]] && continue
+    [[ $name == (_sz_*|SZ_*) ]] && continue
     # Completion-system state is an explicit non-goal (§3), and it is most of
     # what a compinit'd shell holds: 1498 of 1511 functions on a real zshrc.
     [[ $name == (_comp*|_patcomps|_postpatcomps|_services|_lastcomp|comppostfuncs|compprefuncs) ]] && continue
