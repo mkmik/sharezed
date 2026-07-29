@@ -81,7 +81,8 @@ tracked, so it shows up here first.
 
 `sharezed status` · `log` · `diff [N]` · `revert N` · `path explain` · `doctor`.
 `SHAREZED_DISABLE=1` is the kill switch; `SHAREZED_IGNORE='*TOKEN* *SECRET*'`
-drops keys at capture time; `SHAREZED_BOOTSTRAP` overrides `~/.zshrc`.
+drops keys at capture time; `SHAREZED_BOOTSTRAP` captures one file instead of
+the startup sequence.
 
 Local edits always win: a key you changed by hand is skipped and reported in
 `sharezed status`, never clobbered. `PATH` is merged element-wise, so a local

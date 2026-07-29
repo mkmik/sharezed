@@ -108,13 +108,6 @@ fn bootstrap() -> Option<PathBuf> {
     std::env::var_os("SHAREZED_BOOTSTRAP").map(PathBuf::from)
 }
 
-fn describe_bootstrap(b: &Option<PathBuf>) -> String {
-    match b {
-        Some(p) => p.display().to_string(),
-        None => "the zsh startup files".into(),
-    }
-}
-
 /// Where the hook belongs, regardless of what is being captured.
 fn zshrc() -> PathBuf {
     std::env::var_os("ZDOTDIR")
@@ -133,21 +126,17 @@ fn ignore_globs() -> Vec<glob::Pattern> {
         .collect()
 }
 
-/// Globs whose matching PATH-style elements never reach the log. `$TMPDIR` is
-/// the default because anything under it is per-session by construction.
+/// PATH-style elements under `$TMPDIR` never reach the log: anything there is
+/// per-session by construction.
 fn volatile_globs() -> Vec<glob::Pattern> {
-    let mut pats: Vec<String> = std::env::var("SHAREZED_PATH_IGNORE")
-        .unwrap_or_default()
-        .split([' ', ':'])
-        .filter(|p| !p.is_empty())
-        .map(str::to_string)
-        .collect();
-    if let Ok(tmp) = std::env::var("TMPDIR") {
-        pats.push(format!("{}/*", merge::norm(&tmp)));
+    match std::env::var("TMPDIR") {
+        // An empty TMPDIR would build the pattern `/*`, which drops every
+        // absolute path there is.
+        Ok(t) if !t.is_empty() => glob::Pattern::new(&format!("{}/*", merge::norm(&t)))
+            .into_iter()
+            .collect(),
+        _ => Vec::new(),
     }
-    pats.iter()
-        .filter_map(|p| glob::Pattern::new(p).ok())
-        .collect()
 }
 
 fn cursor_env() -> u64 {
@@ -206,7 +195,6 @@ fn reload(channel: &str, force: bool, silent: bool) -> R {
     let head = store.head();
     let changes = state::diff(&store.desired(head)?, &desired);
 
-    meta.bootstrap = describe_bootstrap(&boot);
     meta.sources = sources;
     meta.commands = fingerprints(&cap.commands);
     store.save_meta(&meta)?;
@@ -314,12 +302,12 @@ fn changed_sources(
     let mut out: Vec<String> = now
         .iter()
         .filter(|(p, h)| was.get(*p) != Some(*h))
-        .map(|(p, _)| format!("    {} {p}", if was.contains_key(p) { "~" } else { "+" }))
+        .map(|(p, _)| format!("{} {p}", if was.contains_key(p) { "~" } else { "+" }))
         .collect();
     out.extend(
         was.keys()
             .filter(|p| !now.contains_key(*p))
-            .map(|p| format!("    - {p}")),
+            .map(|p| format!("- {p}")),
     );
     out
 }
@@ -598,8 +586,10 @@ fn doctor(channel: &str, prune_missing: bool) -> R {
     // function of its text, and every flip publishes a phantom generation.
     // Only catches a flip whose trigger is armed right now.
     let boot = bootstrap();
-    let capture_twice = || -> R<capture::Capture> { capture::clean_room(boot.as_deref()) };
-    let (first, second) = (capture_twice()?, capture_twice()?);
+    let (first, second) = (
+        capture::clean_room(boot.as_deref())?,
+        capture::clean_room(boot.as_deref())?,
+    );
     let (ignore, volatile) = (ignore_globs(), volatile_globs());
     let effect = |c: &capture::Capture| {
         let mut e = state::effect(&c.s0, &c.s1, &ignore);
@@ -613,8 +603,8 @@ fn doctor(channel: &str, prune_missing: bool) -> R {
         lines.push((
             "warn",
             format!(
-                "capture is not reproducible: {} between two runs",
-                plural(flap.len(), "key differs")
+                "capture is not reproducible: {} differ between two runs",
+                plural(flap.len(), "key")
             ),
         ));
         lines.extend(
@@ -623,16 +613,17 @@ fn doctor(channel: &str, prune_missing: bool) -> R {
         );
     }
 
+    let meta = store.meta();
     for (what, was, now, total) in [
         (
             "sourced file",
-            store.meta().sources,
+            meta.sources,
             hash_sources(&first.sources),
             first.sources.len(),
         ),
         (
             "command",
-            store.meta().commands,
+            meta.commands,
             fingerprints(&first.commands),
             first.commands.len(),
         ),
@@ -651,7 +642,7 @@ fn doctor(channel: &str, prune_missing: bool) -> R {
                     plural(changed.len(), what)
                 ),
             ));
-            lines.extend(changed.iter().map(|c| ("", c.trim().to_string())));
+            lines.extend(changed.iter().map(|c| ("", c.clone())));
         }
     }
 

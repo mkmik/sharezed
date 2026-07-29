@@ -1,4 +1,4 @@
-//! The append-only log (PRD §7.3) and its trust checks (§7.7).
+//! The append-only log (PRD §7.3), and the uid/mode checks on it (§7.7).
 
 use crate::state::{self, Change, State};
 use serde::{Deserialize, Serialize};
@@ -16,15 +16,13 @@ const SNAPSHOT_EVERY: u64 = 20;
 
 #[derive(Serialize, Deserialize, Default)]
 pub struct Meta {
-    #[serde(default)]
-    pub bootstrap: String,
-    /// Every file the bootstrap sourced, path -> sha256. The trust gate (§7.7)
-    /// compares the whole set: editing a sourced file has to trip it too.
+    /// Every file the bootstrap sourced, path -> sha256. Lets `reload` skip the
+    /// capture when nothing moved, and `doctor` say what did.
     #[serde(default)]
     pub sources: std::collections::BTreeMap<String, String>,
     /// External commands the bootstrap ran, path -> fingerprint. Upgrading one
     /// changes what the zshrc produces (`flux completion zsh`) without touching
-    /// a single file, so this is a staleness signal, not a review gate.
+    /// a single file you own.
     #[serde(default)]
     pub commands: std::collections::BTreeMap<String, String>,
 }
