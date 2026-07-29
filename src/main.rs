@@ -31,6 +31,9 @@ enum Cmd {
         /// Skip the capture entirely unless a tracked file or command changed.
         #[arg(long)]
         if_changed: bool,
+        /// Print nothing on success. Errors still go to stderr.
+        #[arg(long)]
+        silent: bool,
     },
     /// Cursor vs head, pending entries, conflicts.
     Status,
@@ -82,7 +85,7 @@ fn main() {
 fn run(cli: &Cli) -> R {
     let ch = &cli.channel;
     match &cli.command {
-        Cmd::Reload { if_changed } => reload(ch, *if_changed),
+        Cmd::Reload { if_changed, silent } => reload(ch, *if_changed, *silent),
         Cmd::Status => status(ch),
         Cmd::Diff { seq } => diff(ch, *seq),
         Cmd::Log => log(ch),
@@ -156,7 +159,14 @@ fn cursor_env() -> u64 {
 
 // --- producer ---------------------------------------------------------------
 
-fn reload(channel: &str, if_changed: bool) -> R {
+fn reload(channel: &str, if_changed: bool, silent: bool) -> R {
+    // Errors keep going to stderr: silent is about routine chatter on a timer,
+    // not about hiding a broken bootstrap.
+    let say = |msg: String| {
+        if !silent {
+            println!("{msg}");
+        }
+    };
     let store = Store::open(channel)?;
     let _lock = store.lock()?;
     let boot = bootstrap();
@@ -174,15 +184,15 @@ fn reload(channel: &str, if_changed: bool) -> R {
     if if_changed && !meta.sources.is_empty() {
         match stale_dep(&meta) {
             None => {
-                println!(
+                say(format!(
                     "gen {}: {} and {} unchanged",
                     store.head(),
                     plural(meta.sources.len(), "file"),
                     plural(meta.commands.len(), "command")
-                );
+                ));
                 return Ok(());
             }
-            Some(p) => println!("changed: {p}"),
+            Some(p) => say(format!("changed: {p}")),
         }
     }
 
@@ -200,13 +210,16 @@ fn reload(channel: &str, if_changed: bool) -> R {
     store.save_meta(&meta)?;
 
     if changes.is_empty() {
-        println!("gen {head}: nothing to publish");
+        say(format!("gen {head}: nothing to publish"));
         return Ok(());
     }
     validate(&changes)?;
     let seq = store.publish(&changes, &desired)?;
-    println!("gen {head} → gen {seq}: {}", state::summary(&changes));
-    println!("published to channel '{channel}'");
+    say(format!(
+        "gen {head} → gen {seq}: {}",
+        state::summary(&changes)
+    ));
+    say(format!("published to channel '{channel}'"));
     Ok(())
 }
 

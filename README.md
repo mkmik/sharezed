@@ -59,6 +59,9 @@ changed: /Users/mkm/.zsh/zmac
 gen 5 → gen 6: +1 function
 ```
 
+With `--silent` it prints nothing on success — errors still go to stderr — so
+the pair is what belongs in a timer.
+
 Files are compared by content, so `touch` alone doesn't trigger a capture.
 Adding a `source` line or a new command means editing a file that is already
 tracked, so it shows up here first.
