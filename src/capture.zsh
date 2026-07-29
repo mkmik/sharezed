@@ -68,7 +68,9 @@ _sz_dump() {
 
   for name in ${(k)functions}; do
     # `_*` is zsh's convention for completion functions — out of scope (§3).
-    [[ $name == _* ]] && continue
+    # sharezed's own are the exception: they are ordinary functions your config
+    # defined, and syncing them is how a hook change reaches a running shell.
+    [[ $name == _* && $name != _sharezed_* ]] && continue
     # An autoloadable function is recorded by *presence*, never by body:
     # whether it has been called yet is a lazy-loading detail, and letting it
     # into the state makes every "did anything call zmv this run" a phantom diff.

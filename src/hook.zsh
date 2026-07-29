@@ -6,8 +6,6 @@ zmodload zsh/parameter
 typeset -g SHAREZED_BIN=@BIN@
 typeset -g SHAREZED_CHANNEL=@CHANNEL@
 typeset -gx SHAREZED_HEAD=@HEAD@
-typeset -g SHAREZED_HOOK=@HOOKVER@
-typeset -g SHAREZED_HOOKFILE=@HOOKFILE@
 typeset -gx SHAREZED_CONFLICTS=
 
 # Appended to RPROMPT while a reload is pending, when SHAREZED_NOTIFY is set.
@@ -90,18 +88,6 @@ _sharezed_apply() {
 
 _sharezed_precmd() {
   [[ -n $SHAREZED_DISABLE ]] && return 0
-  # Adopt a new hook without restarting the shell. Same fork-free read as
-  # `head`; the fork only happens when the binary's hook actually changed.
-  # Redefining a running function is safe in zsh — this instance finishes on
-  # the old body — so hand the next prompt to the new one and stop here.
-  if [[ -r $SHAREZED_HOOKFILE ]]; then
-    local hv
-    read -r hv < $SHAREZED_HOOKFILE
-    if [[ $hv != $SHAREZED_HOOK ]]; then
-      eval "$($SHAREZED_BIN hook zsh --channel $SHAREZED_CHANNEL)"
-      return 0
-    fi
-  fi
   # Opt-in: publish your own config changes without typing `reload`. Costs a
   # fork and ~6ms per prompt, which is invisible — the reason it is off by
   # default is that it makes pressing enter a publish action, so a half-saved

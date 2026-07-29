@@ -105,10 +105,15 @@ fn guarded(c: &Change, stmt: &str) -> String {
             "if {absent} || {}; then\n  {stmt}\nelse\n  _sharezed_conflict {name}\nfi\n",
             eq(new)
         ),
-        (old, _) => format!(
-            "if {}; then\n  {stmt}\nelse\n  _sharezed_conflict {name}\nfi\n",
-            eq(old.as_deref().unwrap_or_default())
+        // Already holding the new value is not a conflict — applying it is a
+        // no-op. Without this, a shell that started after the publish reports
+        // one for every key in the entry.
+        (Some(old), Some(new)) => format!(
+            "if {} || {}; then\n  {stmt}\nelse\n  _sharezed_conflict {name}\nfi\n",
+            eq(old),
+            eq(new)
         ),
+        (None, None) => String::new(),
     }
 }
 
@@ -116,6 +121,9 @@ fn guarded(c: &Change, stmt: &str) -> String {
 /// same entry, §8.7), then the rest of the params, then functions, then aliases.
 fn order(c: &Change) -> u8 {
     match c.kind {
+        // The apply machinery rewriting itself, last: the guards for every
+        // other key in the entry then run on one consistent version of it.
+        _ if c.name.starts_with("_sharezed_") => 4,
         _ if is_list(c.kind, &c.attrs) => 0,
         Kind::Scalar | Kind::Array | Kind::Assoc => 1,
         Kind::Func | Kind::Autoload => 2,
@@ -178,7 +186,16 @@ pub fn generate(entries: &[(u64, Vec<Change>)], ours: &mut State, families: &[Pa
                         None => unset_stmt(c),
                     };
                     let Some(stmt) = stmt else { continue };
-                    code.push_str(&guarded(c, &stmt));
+                    // theirs-wins for sharezed's own functions (§7.4 allows a
+                    // per-key policy). Guarding them means a shell holding the
+                    // hook its own zshrc installed reads as a local edit, so it
+                    // would keep an old hook forever. Nobody hand-edits these.
+                    if c.name.starts_with("_sharezed_") {
+                        code.push_str(&stmt);
+                        code.push('\n');
+                    } else {
+                        code.push_str(&guarded(c, &stmt));
+                    }
                 }
             }
         }

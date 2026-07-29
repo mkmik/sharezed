@@ -87,12 +87,6 @@ fn main() {
 
 fn run(cli: &Cli) -> R {
     let ch = &cli.channel;
-    // Any invocation of a new binary is how running shells find out its hook
-    // moved, so record it whatever the subcommand was. Best-effort: a store
-    // that cannot be opened is the subcommand's problem to report.
-    if let Ok(s) = Store::open(ch) {
-        let _ = s.note_hook_version(&hook_version());
-    }
     match &cli.command {
         Cmd::Reload {
             force,
@@ -394,12 +388,6 @@ fn export(channel: &str, cursor: u64) -> R {
     Ok(())
 }
 
-/// Identifies the hook text this binary ships, so a shell running an older one
-/// can notice and re-eval it.
-fn hook_version() -> String {
-    sha256(include_str!("hook.zsh").as_bytes())[..12].to_string()
-}
-
 fn hook(channel: &str) -> R {
     let store = Store::open(channel)?;
     let bin = std::env::current_exe()?;
@@ -409,11 +397,6 @@ fn hook(channel: &str) -> R {
             .replace("@BIN@", &payload::zq(&bin.to_string_lossy()))
             .replace("@CHANNEL@", &payload::zq(channel))
             .replace("@HEAD@", &payload::zq(&store.head_path().to_string_lossy()))
-            .replace(
-                "@HOOKFILE@",
-                &payload::zq(&store.hookver_path().to_string_lossy())
-            )
-            .replace("@HOOKVER@", &payload::zq(&hook_version()))
     );
     Ok(())
 }
@@ -773,7 +756,8 @@ mod tests {
             &boot,
             "export EDITOR=acme\nMYTOKEN=sekrit\nalias gs='git status'\n\
              work() { print \"working in $1\" }\ntypeset -a mylist=(a b)\npath=(/opt/x $path)\n\
-             export SHAREZED_NOTIFY=1\nexport SHAREZED_CURSOR=99\n",
+             export SHAREZED_NOTIFY=1\nexport SHAREZED_CURSOR=99\n\
+             _sharezed_precmd() { : }\n",
         )
         .unwrap();
         let cap = capture::clean_room(Some(&boot)).unwrap();

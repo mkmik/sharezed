@@ -57,24 +57,6 @@ impl Store {
         Ok(store)
     }
 
-    pub fn hookver_path(&self) -> PathBuf {
-        self.dir.join("hookver")
-    }
-
-    /// Lets a running shell notice that the binary's hook has changed, with the
-    /// same fork-free read it already does for `head`. Written only on change,
-    /// since this runs on commands that fire every prompt.
-    pub fn note_hook_version(&self, v: &str) -> R {
-        if fs::read_to_string(self.hookver_path())
-            .unwrap_or_default()
-            .trim()
-            != v
-        {
-            write_atomic(&self.hookver_path(), format!("{v}\n").as_bytes())?;
-        }
-        Ok(())
-    }
-
     pub fn head_path(&self) -> PathBuf {
         self.dir.join("head")
     }

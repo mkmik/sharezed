@@ -116,13 +116,14 @@ press enter. Not worth it.
 
 ## Upgrading
 
-Running shells adopt a new hook on their next prompt: the binary records its
-hook's version next to the log, and the precmd notices with the same fork-free
-read it already does for `head`. Redefining a running function is safe in zsh,
-so the fork only happens when the hook actually changed.
+The hook's own functions are captured and published like any others, so a new
+hook reaches running shells through the ordinary apply path — no separate
+mechanism. They're applied last in an entry, so the guards for everything else
+run on one consistent version of the machinery, and they're theirs-wins: a
+shell holding the hook its own zshrc installed would otherwise read as a local
+edit and keep an old hook forever.
 
-Shells started before this existed have no version to compare, so they need
-one last manual nudge:
+Shells started before this existed need one nudge, then they're autonomous:
 
 ```zsh
 eval "$(sharezed hook zsh)"
