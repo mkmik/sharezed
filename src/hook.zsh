@@ -7,6 +7,10 @@ typeset -g SHAREZED_BIN=@BIN@
 typeset -g SHAREZED_CHANNEL=@CHANNEL@
 typeset -gx SHAREZED_HEAD=@HEAD@
 typeset -gx SHAREZED_CONFLICTS=
+# Set by the precmd when SHAREZED_NOTIFY is on. Put it in your prompt:
+#   setopt promptsubst
+#   RPROMPT='${SHAREZED_STALE}'"$RPROMPT"
+typeset -g SHAREZED_STALE=
 
 # A fresh shell has just run the bootstrap, so it already *is* the desired
 # state — start at head, not at 0. Exported so `sharezed status` can read it.
@@ -90,6 +94,14 @@ _sharezed_precmd() {
   # zshrc reaches every shell at whatever moment you next hit a prompt.
   [[ -n $SHAREZED_AUTORELOAD ]] &&
     $SHAREZED_BIN reload --channel $SHAREZED_CHANNEL --silent
+  # Same fork, but it only looks: the human still decides when to publish.
+  if [[ -n $SHAREZED_NOTIFY ]]; then
+    if $SHAREZED_BIN reload --channel $SHAREZED_CHANNEL --check --silent; then
+      SHAREZED_STALE=
+    else
+      SHAREZED_STALE='%F{yellow}↻ sharezed reload%f'
+    fi
+  fi
   [[ -r $SHAREZED_HEAD ]] || return 0
   local head
   read -r head < $SHAREZED_HEAD || return 0

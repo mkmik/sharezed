@@ -34,6 +34,9 @@ enum Cmd {
         /// Print nothing on success. Errors still go to stderr.
         #[arg(long)]
         silent: bool,
+        /// Report only: exit 1 if a capture would have something to do.
+        #[arg(long)]
+        check: bool,
     },
     /// Cursor vs head, pending entries, conflicts.
     Status,
@@ -85,7 +88,11 @@ fn main() {
 fn run(cli: &Cli) -> R {
     let ch = &cli.channel;
     match &cli.command {
-        Cmd::Reload { force, silent } => reload(ch, *force, *silent),
+        Cmd::Reload {
+            force,
+            silent,
+            check,
+        } => reload(ch, *force, *silent, *check),
         Cmd::Status => status(ch),
         Cmd::Diff { seq } => diff(ch, *seq),
         Cmd::Log => log(ch),
@@ -148,7 +155,7 @@ fn cursor_env() -> u64 {
 
 // --- producer ---------------------------------------------------------------
 
-fn reload(channel: &str, force: bool, silent: bool) -> R {
+fn reload(channel: &str, force: bool, silent: bool, check: bool) -> R {
     // Errors keep going to stderr: silent is about routine chatter on a timer,
     // not about hiding a broken bootstrap.
     let say = |msg: String| {
@@ -157,6 +164,15 @@ fn reload(channel: &str, force: bool, silent: bool) -> R {
         }
     };
     let store = Store::open(channel)?;
+    if check {
+        // Deliberately before the lock: this runs on every prompt in every
+        // shell, and an exclusive flock there would serialize all of them.
+        if let Some(p) = stale_dep(&store.meta()) {
+            say(format!("changed: {p}"));
+            std::process::exit(1);
+        }
+        return Ok(());
+    }
     let _lock = store.lock()?;
     let boot = bootstrap();
     if let Some(b) = &boot

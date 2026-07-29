@@ -63,17 +63,34 @@ moved: a bootstrap that reads a file it never sources, or a change to
 `SHAREZED_IGNORE`.
 
 With `--silent` it prints nothing on success — errors still go to stderr — so
-the pair is what belongs in a timer, or in the hook itself:
+the pair is what belongs in a timer.
+
+## Being told to reload
+
+`--check` only looks: exit 1 if a capture would find something, 2.5ms, no
+lock. Wire it to your prompt and you never have to remember:
+
+```zsh
+export SHAREZED_NOTIFY=1
+setopt promptsubst
+RPROMPT='${SHAREZED_STALE}'"$RPROMPT"     # ↻ sharezed reload, when stale
+```
+
+The hook sets `SHAREZED_STALE` in precmd; the prompt itself renders with no
+fork. The indicator clears the moment you reload.
+
+If you want it to just happen instead:
 
 ```zsh
 export SHAREZED_AUTORELOAD=1   # publish your own edits without typing reload
 ```
 
-Off by default. Not for the ~6ms it adds to a prompt, which is invisible, but
-because it makes pressing enter a publish action: a half-saved zshrc reaches
-every shell at whatever moment you next hit a prompt. Concurrency is safe —
-`reload` takes the channel lock before reading meta, so eight shells racing
-after one edit publish exactly one generation (verified).
+That one is off by default. Not for the ~6ms it adds to a prompt, which is
+invisible, but because it makes pressing enter a publish action: a half-saved
+zshrc reaches every shell at whatever moment you next hit a prompt.
+Concurrency is safe either way — `reload` takes the channel lock before
+reading meta, so eight shells racing after one edit publish exactly one
+generation (verified).
 
 Files are compared by content, so `touch` alone doesn't trigger a capture.
 Adding a `source` line or a new command means editing a file that is already
