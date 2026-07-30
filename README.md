@@ -1,4 +1,4 @@
-# sharezed
+<p align="center"><img src="docs/logo.svg" alt="sharezed" width="260"></p>
 
 direnv for *everything a shell knows*, not just env vars — capture the delta a
 script makes to shell state, publish it as an append-only log, and let dozens of
