@@ -9,7 +9,7 @@ Design: [docs/PRD.md](docs/PRD.md).
 ## Install
 
 ```zsh
-cargo install sharezed
+cargo install sharezed --force
 eval "$(sharezed hook zsh)"    # in ~/.zshrc
 ```
 
