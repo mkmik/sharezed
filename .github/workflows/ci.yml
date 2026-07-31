@@ -47,6 +47,11 @@ jobs:
       - id: v
         run: echo "v=$(cargo metadata --no-deps --format-version 1 | jq -r '.packages[0].version')" >> "$GITHUB_OUTPUT"
 
+      # Before the push, so a registry or trusted-publishing problem fails while
+      # main is still untouched rather than after it has been bumped and tagged.
+      - uses: rust-lang/crates-io-auth-action@v1
+        id: auth
+
       # Pushed with GITHUB_TOKEN, which by design does not trigger workflows —
       # that is what keeps this job from re-triggering itself forever.
       - run: |
@@ -58,8 +63,10 @@ jobs:
         env:
           V: ${{ steps.v.outputs.v }}
 
-      - uses: rust-lang/crates-io-auth-action@v1
-        id: auth
+      # Still after the push: a failed publish leaves a tag with no crate and the
+      # next merge just moves on to the next version. Publishing first and then
+      # failing to push would strand a version that main does not know it used,
+      # and every later run would collide with it.
       - run: cargo publish --locked
         env:
           CARGO_REGISTRY_TOKEN: ${{ steps.auth.outputs.token }}
