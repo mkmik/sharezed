@@ -33,7 +33,11 @@ pub struct Store {
 
 impl Store {
     pub fn open(channel: &str) -> R<Store> {
+        // Empty means unset (XDG spec). Taking it literally would put the log —
+        // a code-execution channel into every shell you own — in a relative
+        // `sharezed/` under whatever directory you happened to be in.
         let base = std::env::var_os("XDG_STATE_HOME")
+            .filter(|v| !v.is_empty())
             .map(PathBuf::from)
             .unwrap_or_else(|| home().join(".local/state"));
         let dir = base.join("sharezed").join(channel);

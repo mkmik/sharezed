@@ -37,6 +37,9 @@ enum Cmd {
         /// Report only: exit 1 if a capture would have something to do.
         #[arg(long)]
         check: bool,
+        /// Capture but publish nothing: exit 1 if there is something to publish.
+        #[arg(long, conflicts_with = "check")]
+        dry_run: bool,
     },
     /// Cursor vs head, pending entries, conflicts.
     Status,
@@ -92,7 +95,8 @@ fn run(cli: &Cli) -> R {
             force,
             silent,
             check,
-        } => reload(ch, *force, *silent, *check),
+            dry_run,
+        } => reload(ch, *force, *silent, *check, *dry_run),
         Cmd::Status => status(ch),
         Cmd::Diff { seq } => diff(ch, *seq),
         Cmd::Log => log(ch),
@@ -155,7 +159,7 @@ fn cursor_env() -> u64 {
 
 // --- producer ---------------------------------------------------------------
 
-fn reload(channel: &str, force: bool, silent: bool, check: bool) -> R {
+fn reload(channel: &str, force: bool, silent: bool, check: bool, dry_run: bool) -> R {
     // Errors keep going to stderr: silent is about routine chatter on a timer,
     // not about hiding a broken bootstrap.
     let say = |msg: String| {
@@ -213,13 +217,24 @@ fn reload(channel: &str, force: bool, silent: bool, check: bool) -> R {
 
     meta.sources = sources;
     meta.commands = fingerprints(&cap.commands);
-    store.save_meta(&meta)?;
+    // A dry run leaves the fingerprints stale on purpose: recording them would
+    // clear the prompt nag for a capture that never happened.
+    if !dry_run {
+        store.save_meta(&meta)?;
+    }
 
     if changes.is_empty() {
         say(format!("gen {head}: nothing to publish"));
         return Ok(());
     }
     validate(&changes)?;
+    if dry_run {
+        say(format!(
+            "gen {head}: would publish {}",
+            state::summary(&changes)
+        ));
+        std::process::exit(1);
+    }
     let seq = store.publish(&changes, &desired)?;
     say(format!(
         "gen {head} → gen {seq}: {}",

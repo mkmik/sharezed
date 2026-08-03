@@ -87,7 +87,19 @@ the hook line, and it leaves anything else in `RPROMPT` untouched. No
 
 The check behind it is `reload --check`: exit 1 if a capture would find
 something, 2.5ms, and no channel lock, since it runs on every prompt in every
-shell.
+shell. It only compares fingerprints, so it says "changed" for an edit that
+turns out to publish nothing — a touched `~/.zcompdump` is the usual one.
+
+`reload --dry-run` answers the stricter question: it captures for real and
+exits 1 only if there is a delta to publish, 0 if there isn't. It publishes
+nothing and records no fingerprints, so it won't quiet the prompt nag on your
+behalf.
+
+```zsh
+$ sharezed reload --dry-run
+changed: /Users/mkm/.zcompdump
+gen 11: nothing to publish        # exit 0 — the reload would be a no-op
+```
 
 If you want it to just happen instead:
 
