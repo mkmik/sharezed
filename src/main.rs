@@ -40,6 +40,10 @@ enum Cmd {
         /// Capture but publish nothing: exit 1 if there is something to publish.
         #[arg(long, conflicts_with = "check")]
         dry_run: bool,
+        /// Publish nothing, but if there is nothing to publish, record the
+        /// fingerprints anyway — one capture, so nothing slips in between.
+        #[arg(long, conflicts_with_all = ["check", "dry_run"])]
+        if_noop: bool,
     },
     /// Cursor vs head, pending entries, conflicts.
     Status,
@@ -96,7 +100,8 @@ fn run(cli: &Cli) -> R {
             silent,
             check,
             dry_run,
-        } => reload(ch, *force, *silent, *check, *dry_run),
+            if_noop,
+        } => reload(ch, *force, *silent, *check, *dry_run, *if_noop),
         Cmd::Status => status(ch),
         Cmd::Diff { seq } => diff(ch, *seq),
         Cmd::Log => log(ch),
@@ -159,7 +164,14 @@ fn cursor_env() -> u64 {
 
 // --- producer ---------------------------------------------------------------
 
-fn reload(channel: &str, force: bool, silent: bool, check: bool, dry_run: bool) -> R {
+fn reload(
+    channel: &str,
+    force: bool,
+    silent: bool,
+    check: bool,
+    dry_run: bool,
+    if_noop: bool,
+) -> R {
     // Errors keep going to stderr: silent is about routine chatter on a timer,
     // not about hiding a broken bootstrap.
     let say = |msg: String| {
@@ -185,7 +197,7 @@ fn reload(channel: &str, force: bool, silent: bool, check: bool, dry_run: bool) 
         return Err(format!("bootstrap {} is not a file", b.display()).into());
     }
 
-    let mut meta = store.meta();
+    let meta = store.meta();
     // Re-hashing what the last capture recorded needs no shell at all, so this
     // is milliseconds against a second-plus. Adding a new `source` line or a
     // new command means editing a file that is already tracked, so a change
@@ -207,28 +219,52 @@ fn reload(channel: &str, force: bool, silent: bool, check: bool, dry_run: bool) 
         }
     }
 
+    // The prompt runs this on every keypress while the files are dirty, and a
+    // delta nobody has published yet keeps them dirty. Nothing has moved since
+    // the capture that found it, so its answer still stands — and answering
+    // from memory is 2ms against a second.
+    let digest = dep_digest(&meta);
+    if if_noop && !force && meta.stalled == digest && !digest.is_empty() {
+        say(format!(
+            "gen {}: still something to publish, unchanged since the last capture",
+            store.head()
+        ));
+        std::process::exit(1);
+    }
+
     let cap = capture::clean_room(boot.as_deref())?;
-    let sources = hash_sources(&cap.sources);
+    // A fresh capture answers for itself, so it clears any memo.
+    let fresh = store::Meta {
+        sources: hash_sources(&cap.sources),
+        commands: fingerprints(&cap.commands),
+        stalled: String::new(),
+    };
 
     let mut desired = state::effect(&cap.s0, &cap.s1, &ignore_globs());
     state::drop_volatile(&mut desired, &volatile_globs());
     let head = store.head();
     let changes = state::diff(&store.desired(head)?, &desired);
 
-    meta.sources = sources;
-    meta.commands = fingerprints(&cap.commands);
-    // A dry run leaves the fingerprints stale on purpose: recording them would
-    // clear the prompt nag for a capture that never happened.
-    if !dry_run {
-        store.save_meta(&meta)?;
-    }
-
     if changes.is_empty() {
+        // The fingerprints are the only thing that moved, so recording them is
+        // the whole reload — and the prompt nag goes quiet. A dry run doesn't:
+        // it must stay repeatable and answer for a capture, not perform one.
+        if !dry_run {
+            store.save_meta(&fresh)?;
+        }
         say(format!("gen {head}: nothing to publish"));
         return Ok(());
     }
     validate(&changes)?;
-    if dry_run {
+    // Fingerprints stay stale here on purpose: nothing was published, so the
+    // nag has to survive — there is a real delta waiting for a human.
+    if dry_run || if_noop {
+        if if_noop {
+            store.save_meta(&store::Meta {
+                stalled: digest,
+                ..meta
+            })?;
+        }
         say(format!(
             "gen {head}: would publish {}",
             state::summary(&changes)
@@ -236,6 +272,9 @@ fn reload(channel: &str, force: bool, silent: bool, check: bool, dry_run: bool) 
         std::process::exit(1);
     }
     let seq = store.publish(&changes, &desired)?;
+    // After the publish, never before: a fingerprint recorded for a generation
+    // that failed to land would clear the nag and never be retried.
+    store.save_meta(&fresh)?;
     say(format!(
         "gen {head} → gen {seq}: {}",
         state::summary(&changes)
@@ -293,6 +332,28 @@ fn stale_dep(meta: &store::Meta) -> Option<String> {
             .find(|(p, f)| fingerprint(Path::new(p)).as_ref() != Some(*f))
     })
     .map(|(p, _)| p.clone())
+}
+
+/// The tracked files and commands as they are *now*, in one line. `stale_dep`
+/// asks whether they still match the last publish; this is what lets a caller
+/// ask whether they still match the last capture. Empty when nothing is
+/// tracked yet, which must never count as a match.
+fn dep_digest(meta: &store::Meta) -> String {
+    if meta.sources.is_empty() && meta.commands.is_empty() {
+        return String::new();
+    }
+    let mut buf = String::new();
+    for p in meta.sources.keys() {
+        let h = std::fs::read(p).map(|b| sha256(&b)).unwrap_or_default();
+        buf.push_str(&format!("{p}\0{h}\n"));
+    }
+    for p in meta.commands.keys() {
+        buf.push_str(&format!(
+            "{p}\0{}\n",
+            fingerprint(Path::new(p)).unwrap_or_default()
+        ));
+    }
+    sha256(buf.as_bytes())
 }
 
 /// Under this, a file is a script: its content is what matters and reading it
@@ -758,6 +819,82 @@ mod tests {
             "",
             "hook must be silent when the channel is empty"
         );
+    }
+
+    /// The nag is a three-way decision now — settled, refused, or opted out —
+    /// and an `&&`/`||` chain is exactly the thing that silently inverts. Stub
+    /// the binary so this is about the branch, not about capture.
+    #[test]
+    fn precmd_settles_before_it_nags() {
+        if !has_zsh() {
+            return;
+        }
+        use std::os::unix::fs::PermissionsExt;
+        let dir = std::env::temp_dir().join(format!("sharezed-hook-{}", std::process::id()));
+        std::fs::create_dir_all(&dir).unwrap();
+        let (bin, calls) = (dir.join("stub"), dir.join("calls"));
+        std::fs::write(
+            &bin,
+            format!(
+                "#!/bin/sh\nprintf '%s\\n' \"$*\" >> '{}'\ncase \"$*\" in\n\
+                 *--check*) exit ${{STUB_CHECK:-0}} ;;\n\
+                 *--if-noop*) exit ${{STUB_SETTLE:-0}} ;;\nesac\nexit 0\n",
+                calls.display()
+            ),
+        )
+        .unwrap();
+        std::fs::set_permissions(&bin, std::fs::Permissions::from_mode(0o755)).unwrap();
+        let hook = include_str!("hook.zsh")
+            .replace("@BIN@", &payload::zq(&bin.to_string_lossy()))
+            .replace("@CHANNEL@", "'user'")
+            .replace(
+                "@HEAD@",
+                &payload::zq(&dir.join("nohead").to_string_lossy()),
+            );
+
+        // (check, settle, SHAREZED_NO_SETTLE) -> (RPROMPT, what was called)
+        let run = |check: &str, settle: &str, no_settle: &str| -> (String, String) {
+            let _ = std::fs::remove_file(&calls);
+            let out = Command::new("zsh")
+                .args(["-f", "-c"])
+                .arg(format!(
+                    "{hook}\nRPROMPT=keepme\n_sharezed_precmd\nprint -r -- $RPROMPT"
+                ))
+                .env("STUB_CHECK", check)
+                .env("STUB_SETTLE", settle)
+                .env("SHAREZED_NO_SETTLE", no_settle)
+                .env_remove("SHAREZED_AUTORELOAD")
+                .env_remove("SHAREZED_NO_NOTIFY")
+                .env_remove("SHAREZED_DISABLE")
+                .output()
+                .unwrap();
+            (
+                String::from_utf8_lossy(&out.stdout).into_owned(),
+                std::fs::read_to_string(&calls).unwrap_or_default(),
+            )
+        };
+        let nagged = |s: &str| s.contains("sharezed reload");
+
+        let (rprompt, calls) = run("0", "0", "");
+        assert!(!nagged(&rprompt), "clean: {rprompt:?}");
+        assert!(!calls.contains("--if-noop"), "clean: nothing to settle");
+
+        let (rprompt, calls) = run("1", "0", "");
+        assert!(!nagged(&rprompt), "settled, so no nag: {rprompt:?}");
+        assert!(calls.contains("--if-noop"), "dirty: settle it");
+
+        let (rprompt, _) = run("1", "1", "");
+        assert!(nagged(&rprompt), "a real delta must still nag: {rprompt:?}");
+
+        let (rprompt, calls) = run("1", "0", "1");
+        assert!(nagged(&rprompt), "opted out, so nag as before: {rprompt:?}");
+        assert!(!calls.contains("--if-noop"), "opted out: no capture");
+
+        assert!(
+            run("0", "0", "").0.starts_with("keepme"),
+            "the rest of RPROMPT is not ours to touch"
+        );
+        let _ = std::fs::remove_dir_all(&dir);
     }
 
     /// M0's exit criterion, end to end: capture a bootstrap in a clean room and

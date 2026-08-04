@@ -90,6 +90,16 @@ something, 2.5ms, and no channel lock, since it runs on every prompt in every
 shell. It only compares fingerprints, so it says "changed" for an edit that
 turns out to publish nothing — a touched `~/.zcompdump` is the usual one.
 
+Which is why the prompt doesn't nag about it: when `--check` flags something,
+the hook runs `reload --if-noop` and only nags if *that* finds a real delta.
+Harmless dirt is settled where you'd otherwise have to look at it, and nothing
+is ever published on your behalf. The cost is one capture, once per change —
+the same fork autoreload pays, and never on a steady-state prompt.
+
+```zsh
+export SHAREZED_NO_SETTLE=1    # nag on any dirt, like it used to
+```
+
 `reload --dry-run` answers the stricter question: it captures for real and
 exits 1 only if there is a delta to publish, 0 if there isn't. It publishes
 nothing and records no fingerprints, so it won't quiet the prompt nag on your
@@ -100,6 +110,18 @@ $ sharezed reload --dry-run
 changed: /Users/mkm/.zcompdump
 gen 11: nothing to publish        # exit 0 — the reload would be a no-op
 ```
+
+`reload --if-noop` is that answer plus the follow-through: same capture, and
+if there is nothing to publish it records the fingerprints, which is the
+entire reload and takes the nag off your prompt. If there *is* a delta it
+publishes nothing, exits 1, and leaves the nag up for you to look at. Prefer
+it to `reload --dry-run && reload`: that pair captures twice under two
+separate locks, so a `~/.zcompdump` rewritten in between means the reload you
+authorized is not the one you ran.
+
+A delta it refused keeps your files dirty until you publish, so it remembers
+one: while nothing has moved since, it answers from memory in 2.5ms instead of
+capturing again. That is what makes it cheap enough for the prompt to run.
 
 If you want it to just happen instead:
 

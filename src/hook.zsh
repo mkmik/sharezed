@@ -102,10 +102,22 @@ _sharezed_precmd() {
   # to publish. Strip first, then re-add: idempotent across prompts, and it
   # picks up an RPROMPT your config sets *after* the hook line without saving
   # a copy. No promptsubst needed — precmd runs before the prompt is rendered.
+  #
+  # --check is a fingerprint comparison, so most of what it flags publishes
+  # nothing at all (a rewritten ~/.zcompdump is the everyday one). Settling
+  # that unattended costs one capture — the same fork autoreload pays, and only
+  # while something is dirty — and never publishes: a delta a human should look
+  # at leaves the nag exactly where --check put it. The tool remembers such a
+  # delta, so the retry on the next prompt is a fingerprint check again, not a
+  # second capture. SHAREZED_NO_SETTLE keeps the nag and the fork out of it.
   if [[ -z $SHAREZED_NO_NOTIFY ]]; then
     RPROMPT=${RPROMPT%"$_sharezed_segment"}
-    $SHAREZED_BIN reload --channel $SHAREZED_CHANNEL --check --silent ||
+    if ! $SHAREZED_BIN reload --channel $SHAREZED_CHANNEL --check --silent &&
+       { [[ -n $SHAREZED_NO_SETTLE ]] ||
+         ! $SHAREZED_BIN reload --channel $SHAREZED_CHANNEL --if-noop --silent }
+    then
       RPROMPT+=$_sharezed_segment
+    fi
   fi
   [[ -r $SHAREZED_HEAD ]] || return 0
   local head
