@@ -25,6 +25,11 @@ pub struct Meta {
     /// a single file you own.
     #[serde(default)]
     pub commands: std::collections::BTreeMap<String, String>,
+    /// What the above hashed to when an `--if-noop` capture last found a delta
+    /// it did not publish. That delta keeps the files dirty until a human
+    /// publishes it, so without this the prompt would re-capture forever.
+    #[serde(default)]
+    pub stalled: String,
 }
 
 pub struct Store {
