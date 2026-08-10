@@ -37,13 +37,17 @@ enum Cmd {
         /// Report only: exit 1 if a capture would have something to do.
         #[arg(long)]
         check: bool,
-        /// Capture but publish nothing: exit 1 if there is something to publish.
+        /// Capture but publish nothing: show the diff and exit 1 if there is
+        /// something to publish.
         #[arg(long, conflicts_with = "check")]
         dry_run: bool,
         /// Publish nothing, but if there is nothing to publish, record the
         /// fingerprints anyway — one capture, so nothing slips in between.
         #[arg(long, conflicts_with_all = ["check", "dry_run"])]
         if_noop: bool,
+        /// Summary only: how much would be published, not what.
+        #[arg(short = 'p', long)]
+        plain: bool,
     },
     /// Cursor vs head, pending entries, conflicts.
     Status,
@@ -101,7 +105,8 @@ fn run(cli: &Cli) -> R {
             check,
             dry_run,
             if_noop,
-        } => reload(ch, *force, *silent, *check, *dry_run, *if_noop),
+            plain,
+        } => reload(ch, *force, *silent, *check, *dry_run, *if_noop, *plain),
         Cmd::Status => status(ch),
         Cmd::Diff { seq } => diff(ch, *seq),
         Cmd::Log => log(ch),
@@ -171,6 +176,7 @@ fn reload(
     check: bool,
     dry_run: bool,
     if_noop: bool,
+    plain: bool,
 ) -> R {
     // Errors keep going to stderr: silent is about routine chatter on a timer,
     // not about hiding a broken bootstrap.
@@ -269,6 +275,13 @@ fn reload(
             "gen {head}: would publish {}",
             state::summary(&changes)
         ));
+        // What `sharezed diff` would show after the reload — deciding whether to
+        // publish means reading the keys, not counting them.
+        if !plain {
+            for c in &changes {
+                say(describe(c));
+            }
+        }
         std::process::exit(1);
     }
     let seq = store.publish(&changes, &desired)?;

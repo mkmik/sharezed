@@ -43,6 +43,17 @@ fn dry_run_reports_without_publishing() {
     let (code, out) = sharezed(&state, &boot, &["--dry-run"]);
     assert_eq!(code, 1, "something to publish → exit 1: {out}");
     assert!(out.contains("would publish"), "{out}");
+    assert!(
+        out.contains("DRY_PROBE") && out.contains("1 → 2"),
+        "the diff itself, not just how much of it: {out}"
+    );
+
+    let (_, brief) = sharezed(&state, &boot, &["--dry-run", "-p"]);
+    assert!(brief.contains("would publish"), "{brief}");
+    assert!(
+        !brief.contains("DRY_PROBE"),
+        "-p is the summary only: {brief}"
+    );
 
     // Nothing was published, and no fingerprint was recorded — so a second dry
     // run must say exactly the same thing rather than go quiet.
