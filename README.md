@@ -103,12 +103,25 @@ export SHAREZED_NO_SETTLE=1    # nag on any dirt, like it used to
 `reload --dry-run` answers the stricter question: it captures for real and
 exits 1 only if there is a delta to publish, 0 if there isn't. It publishes
 nothing and records no fingerprints, so it won't quiet the prompt nag on your
-behalf.
+behalf. When there is a delta it prints it key by key — the same view
+`sharezed diff` would give you after the reload, which is what you'd read
+before authorizing one. `-p` prints just the count.
 
 ```zsh
 $ sharezed reload --dry-run
 changed: /Users/mkm/.zcompdump
 gen 11: nothing to publish        # exit 0 — the reload would be a no-op
+
+$ sharezed reload --dry-run
+changed: /Users/mkm/.zshrc
+gen 11: would publish ~2 params, +1 function      # exit 1
+  ~ scalar  EDITOR                   vim → hx
+  ~ array   path                     5 → 6 elements
+      +   1  /opt/b
+  + func    work                     print "working in $1"
+
+$ sharezed reload --dry-run -p
+gen 11: would publish ~2 params, +1 function
 ```
 
 `reload --if-noop` is that answer plus the follow-through: same capture, and
