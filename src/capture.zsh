@@ -38,7 +38,7 @@ _sz_is_autoload() {
 
 _sz_dump() {
   emulate -L zsh   # safe: nothing captured here is option-sensitive (§5.4b)
-  local name attrs k
+  local name attrs k target
   local -a v
   for name attrs in ${(kv)parameters}; do
     (( ${_sz_deny[(Ie)$name]} )) && continue
@@ -52,6 +52,8 @@ _sz_dump() {
     [[ $name == (_sz_*|SZ_*) ]] && continue
     # Completion-system state is an explicit non-goal (§3), and it is most of
     # what a compinit'd shell holds: 1498 of 1511 functions on a real zshrc.
+    # `_comps` goes out whole here; the handful of entries worth syncing are
+    # emitted one by one as `compdef` records below.
     [[ $name == (_comp*|_patcomps|_postpatcomps|_services|_lastcomp|comppostfuncs|compprefuncs) ]] && continue
     # Hook arrays name functions a receiving shell may not have — and could
     # drop sharezed's own precmd. Per-shell wiring, never synced (§5.2, G7).
@@ -72,18 +74,33 @@ _sz_dump() {
   done
 
   for name in ${(k)functions}; do
-    # `_*` is zsh's convention for completion functions — out of scope (§3).
-    # sharezed's own are the exception: they are ordinary functions your config
-    # defined, and syncing them is how a hook change reaches a running shell.
-    [[ $name == _* && $name != _sharezed_* ]] && continue
     # An autoloadable function is recorded by *presence*, never by body:
     # whether it has been called yet is a lazy-loading detail, and letting it
     # into the state makes every "did anything call zmv this run" a phantom diff.
     if _sz_is_autoload $name; then
+      # `_*` is zsh's convention for completion functions, and compinit stubs
+      # out ~1500 of them from $fpath — the completion system itself, an
+      # explicit non-goal (§3). A `_*` function with a *body* is not one of
+      # those: it is a function your config wrote (`ccwt init zsh` defines
+      # `_ccwt`, `fp completions zsh` defines `_fp`), so it syncs like any
+      # other. SHAREZED_IGNORE is the valve if one of them is too fat.
+      [[ $name == _* ]] && continue
       print -rN -- autoload "$name" "" 0
     else
       print -rN -- func "$name" "" 1 "$functions[$name]"
     fi
+  done
+  # The `compdef` calls your config made. `_comps` itself never syncs — compinit
+  # builds ~1900 entries from the `#compdef` tags in $fpath and rebuilds them in
+  # every shell — but the entries pointing at a function *this dump carries* are
+  # yours, and there is exactly one kind of function that qualifies: one your
+  # config defined. On a stock compinit that filter keeps 0 of 1874. Without
+  # them a new completion syncs its function and nothing binds it to a command.
+  for name in ${(k)_comps}; do
+    target=$_comps[$name]
+    (( ${+functions[$target]} )) || continue
+    _sz_is_autoload $target && continue
+    print -rN -- compdef "$name" "" 1 "$target"
   done
   for name attrs in ${(kv)aliases};  do print -rN -- alias  "$name" "" 1 "$attrs"; done
   for name attrs in ${(kv)galiases}; do print -rN -- galias "$name" "" 1 "$attrs"; done
