@@ -14,6 +14,9 @@ pub enum Kind {
     Alias,
     Galias,
     Salias,
+    /// A `compdef` binding: `name` is the command, the value the completion
+    /// function. The rest of `_comps` is compinit's own and never syncs.
+    Compdef,
 }
 
 impl Kind {
@@ -28,6 +31,7 @@ impl Kind {
             Kind::Alias => "alias",
             Kind::Galias => "galias",
             Kind::Salias => "salias",
+            Kind::Compdef => "compdef",
         }
     }
 }
@@ -105,6 +109,7 @@ pub fn parse_wire(buf: &[u8]) -> Result<State, String> {
             ("alias", _) => Kind::Alias,
             ("galias", _) => Kind::Galias,
             ("salias", _) => Kind::Salias,
+            ("compdef", _) => Kind::Compdef,
             (k, _) => return Err(format!("unknown kind {k:?}")),
         };
         state.insert(
@@ -213,6 +218,7 @@ pub fn summary(changes: &[Change]) -> String {
             "aliases",
             &[Kind::Alias, Kind::Galias, Kind::Salias][..],
         ),
+        ("compdef", "compdefs", &[Kind::Compdef][..]),
     ] {
         let of = |f: &dyn Fn(&Change) -> bool| {
             changes

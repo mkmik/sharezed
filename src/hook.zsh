@@ -40,6 +40,10 @@ _sharezed_cur() {   # kind name -> reply=(value...); returns 1 if the key is abs
     alias)  (( ${+aliases[$n]} ))    || return 1; reply=( "$aliases[$n]" ) ;;
     galias) (( ${+galiases[$n]} ))   || return 1; reply=( "$galiases[$n]" ) ;;
     salias) (( ${+saliases[$n]} ))   || return 1; reply=( "$saliases[$n]" ) ;;
+    # Read straight out of the completion system's table. A shell that never
+    # ran compinit has no `_comps` at all, so every binding reads as absent —
+    # which is right: it has nothing to bind, and the payload skips it.
+    compdef) (( ${+_comps[$n]} ))    || return 1; reply=( "$_comps[$n]" ) ;;
   esac
   return 0
 }

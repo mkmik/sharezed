@@ -62,7 +62,7 @@ consumer:  precmd hook ── head != cursor? ──▶ apply Δ(cursor..head] �
 - Cross-user or cross-host sync. Single uid, single machine.
 - bash/fish. (Architecture shouldn't preclude them; the capture layer is shell-specific by design.)
 - Replacing direnv. sharezed is machine/user-scoped; direnv stays directory-scoped. See §12.
-- **Everything outside the four kinds in G1.** Specifically out: shell options (`setopt`), named directories (`hash -d`), key bindings (`bindkey`), traps, and completion-system state (`_comps`/`_patcomps`). Options in particular were considered and cut: they are the highest-risk category (a stray `setopt` mode change is far harder to notice and diagnose than a wrong variable) for the least benefit.
+- **Everything outside the four kinds in G1.** Specifically out: shell options (`setopt`), named directories (`hash -d`), key bindings (`bindkey`), traps, and the completion *system* — `_patcomps`, `_services`, the `$fpath` stubs `compinit` autoloads, and the ~1900 `_comps` entries it builds from their `#compdef` tags, all of which every shell rebuilds for itself. A completion your zshrc *writes* is not that, and does sync: the `_ccwt` that `ccwt init zsh` defines is an ordinary function, one of the four kinds, and the `compdef` binding it to a command rides along as a fifth. The filter is "does this `_comps` entry point at a function we are carrying" — 5 of 1874 on a real zshrc. Options in particular were considered and cut: they are the highest-risk category (a stray `setopt` mode change is far harder to notice and diagnose than a wrong variable) for the least benefit.
 
 ## 4. Terminology
 

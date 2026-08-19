@@ -107,6 +107,51 @@ fn if_noop_settles_the_harmless_case_and_leaves_the_real_one() {
     let _ = std::fs::remove_dir_all(&tmp);
 }
 
+/// A completion is a `_*` function plus the `compdef` that binds it. Both halves
+/// have to publish when your config wrote them — and neither may when they came
+/// out of `$fpath`, which is the completion system rebuilding itself in every
+/// shell (§3). `_comps` is set by hand here: that is exactly what `compdef`
+/// does, minus a `compinit` scan of whatever fpath the test machine has.
+#[test]
+fn hand_written_completions_publish_but_fpath_stubs_do_not() {
+    if !has_zsh() {
+        return;
+    }
+    let tmp = std::env::temp_dir().join(format!("sharezed-comp-{}", std::process::id()));
+    let (state, boot, fp) = (tmp.join("state"), tmp.join("boot.zsh"), tmp.join("fp"));
+    std::fs::create_dir_all(&state).unwrap();
+    std::fs::create_dir_all(&fp).unwrap();
+    std::fs::write(fp.join("_stubby"), "#compdef stubby\n_message stubby\n").unwrap();
+    std::fs::write(
+        &boot,
+        format!(
+            "fpath+=('{}')\n\
+             autoload -Uz _stubby\n\
+             _probe_comp() {{ print hi }}\n\
+             typeset -gA _comps=( probecmd _probe_comp stubby _stubby )\n",
+            fp.display()
+        ),
+    )
+    .unwrap();
+
+    let (code, out) = sharezed(&state, &boot, &["--dry-run"]);
+    assert_eq!(code, 1, "{out}");
+    assert!(
+        out.contains("_probe_comp"),
+        "a `_*` function with a body: {out}"
+    );
+    assert!(
+        out.contains("compdef probecmd"),
+        "and the binding that makes it reachable: {out}"
+    );
+    assert!(
+        !out.contains("stubby"),
+        "an fpath stub, and the binding compinit builds for it: {out}"
+    );
+
+    let _ = std::fs::remove_dir_all(&tmp);
+}
+
 /// The prompt calls this on every keypress while the files are dirty, so the
 /// answer it just computed has to come back from memory — a second-long capture
 /// per prompt is the difference between usable and not.

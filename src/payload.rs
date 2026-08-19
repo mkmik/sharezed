@@ -54,6 +54,14 @@ fn set_stmt(c: &Change, vals: &[String]) -> Option<String> {
         Kind::Alias => format!("alias -- {}", zq(&format!("{}={}", c.name, one()))),
         Kind::Galias => format!("alias -g -- {}", zq(&format!("{}={}", c.name, one()))),
         Kind::Salias => format!("alias -s -- {}", zq(&format!("{}={}", c.name, one()))),
+        // A shell that never ran `compinit` has no `compdef` and nothing to
+        // bind — it must skip this quietly, not fail on every prompt. The
+        // command name is quoted because `-default-` and friends are real keys.
+        Kind::Compdef => format!(
+            "(( $+functions[compdef] )) && compdef -- {} {}",
+            zq(&one()),
+            zq(&c.name)
+        ),
         _ if !valid_name(&c.name) => return None,
         Kind::Scalar => format!(
             "typeset {} {}={}",
@@ -79,6 +87,10 @@ fn unset_stmt(c: &Change) -> Option<String> {
         // `unalias -g` is not accepted; plain unalias removes a global alias.
         Kind::Alias | Kind::Galias => format!("unalias -- {}", zq(&c.name)),
         Kind::Salias => format!("unalias -s -- {}", zq(&c.name)),
+        Kind::Compdef => format!(
+            "(( $+functions[compdef] )) && compdef -d -- {}",
+            zq(&c.name)
+        ),
         _ if valid_name(&c.name) => format!("unset {}", c.name),
         _ => return None,
     })
@@ -118,7 +130,8 @@ fn guarded(c: &Change, stmt: &str) -> String {
 }
 
 /// Ordered-list params first (`fpath` must land before any autoload stub in the
-/// same entry, §8.7), then the rest of the params, then functions, then aliases.
+/// same entry, §8.7), then the rest of the params, then functions, then aliases
+/// and `compdef` bindings — which have to follow the function they name.
 fn order(c: &Change) -> u8 {
     match c.kind {
         // The apply machinery rewriting itself, last: the guards for every
@@ -272,6 +285,30 @@ mod tests {
         );
         assert!(p.contains("autoload -Uz -- 'zmv'"), "{}", p);
         assert!(p.contains("alias -- 'll=ls -l'"), "{}", p);
+    }
+
+    /// A completion is two things — the function and the `compdef` that binds
+    /// it to a command — and the binding is useless before the function exists.
+    #[test]
+    fn a_compdef_binding_lands_after_the_function_it_names() {
+        let f = change(Kind::Func, "_ccwt", "", Some(&["print hi"]), None);
+        let b = change(Kind::Compdef, "ccwt", "", Some(&["_ccwt"]), None);
+        // reversed on purpose: `order` is what puts them right, not the input
+        let p = generate(&[(1, vec![b, f])], &mut State::new(), &[]);
+        let bind = "(( $+functions[compdef] )) && compdef -- '_ccwt' 'ccwt'";
+        assert!(p.contains(bind), "{p}");
+        assert!(
+            p.find("function '_ccwt'").unwrap() < p.find(bind).unwrap(),
+            "{p}"
+        );
+        assert!(p.contains("_sharezed_absent compdef 'ccwt'"), "{p}");
+
+        let gone = change(Kind::Compdef, "ccwt", "", None, Some(&["_ccwt"]));
+        let p = generate(&[(2, vec![gone])], &mut State::new(), &[]);
+        assert!(
+            p.contains("(( $+functions[compdef] )) && compdef -d -- 'ccwt'"),
+            "{p}"
+        );
     }
 
     #[test]
