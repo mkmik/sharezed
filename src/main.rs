@@ -522,6 +522,17 @@ fn describe(c: &state::Change) -> String {
         // One line per change: function bodies are multi-line, and `diff` is
         // what you read before trusting an entry (§7.7).
         let s = v.join(" ").split_whitespace().collect::<Vec<_>>().join(" ");
+        // A prompt is mostly escape sequences: printed raw they would repaint
+        // the terminal instead of describing the change. `\e` is the spelling
+        // the zshrc that produced them uses.
+        let s: String = s
+            .chars()
+            .flat_map(|c| match c {
+                '\x1b' => vec!['\\', 'e'],
+                c if c.is_control() => c.escape_debug().collect(),
+                c => vec![c],
+            })
+            .collect();
         if s.len() > 60 {
             format!("{}…", &s[..s.floor_char_boundary(60)])
         } else {
