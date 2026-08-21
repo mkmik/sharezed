@@ -162,6 +162,20 @@ Local edits always win: a key you changed by hand is skipped and reported in
 `sharezed status`, never clobbered. `PATH` is merged element-wise, so a local
 prepend stays a prepend.
 
+Your prompt syncs too — `PS1`…`PS4`, `RPROMPT`, `SPROMPT`, plus `HISTSIZE`,
+`SAVEHIST` and `WORDCHARS`. These are "special" parameters, which sharezed
+skips by default, because most of them are the shell describing its
+surroundings: `TERM`, `COLUMNS`, `HOME`, `UID`, `SHLVL`. Pushing *those* to
+every terminal would be wrong, so what crosses over is an allowlist of the
+ones you write in a zshrc. `PROMPT` is the same parameter as `PS1` under
+another name; capture publishes it once, under `PS1`.
+
+The catch is a prompt your config *recomputes* — a theme that assigns `PS1` in
+its own precmd. sharezed publishes what your zshrc left and then finds
+something else there, which is a local edit by the only definition it has, so
+it backs off and lists `PS1` in `sharezed status`. Static prompts sync; live
+ones stay yours.
+
 Convergence is **precmd-only, by design**: a shell catches up before its next
 command, not while sitting idle at the prompt. PRD §7.5's `zle -F` path would
 buy an fd and a handler per shell to close a window that ends the moment you

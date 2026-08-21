@@ -22,9 +22,19 @@ typeset -ga _sz_hook_state=(
   SHAREZED_CONFLICTS SHAREZED_PATH0 SHAREZED_DISABLE
 )
 
-# "Skip special params" is too aggressive — PATH is special (§5.4a).
+# "Skip special params" is too aggressive — PATH is special (§5.4a), and so is
+# every prompt. The rest of the writable specials are the shell describing its
+# surroundings (TERM, COLUMNS, HOME, UID, SHLVL) and syncing those across
+# terminals would be actively wrong, so this stays an allowlist.
+#
+# Only the PS* spelling of each prompt is listed: PROMPT/prompt/PROMPT2… are
+# the same parameters under a second name, and both names in the table would
+# publish one edit twice. RPS1/RPROMPT are the exception — neither exists until
+# something assigns one, so the name your config used is the only one to catch.
 _sz_allowed_special() {
-  [[ $1 == (PATH|path|FPATH|fpath|MANPATH|manpath|CDPATH|cdpath) ]]
+  [[ $1 == (PATH|path|FPATH|fpath|MANPATH|manpath|CDPATH|cdpath) ||
+     $1 == (PS[1-4]|SPROMPT|RPS[12]|RPROMPT|RPROMPT2) ||
+     $1 == (HISTSIZE|SAVEHIST|WORDCHARS) ]]
 }
 
 # Autoloadable iff it is still a stub, or it was loaded from a file in $fpath

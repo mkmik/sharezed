@@ -101,38 +101,47 @@ _sharezed_precmd() {
   # zshrc reaches every shell at whatever moment you next hit a prompt.
   [[ -n $SHAREZED_AUTORELOAD ]] &&
     $SHAREZED_BIN reload --channel $SHAREZED_CHANNEL --silent
-  # On by default: forgetting to reload is the failure mode this exists for.
-  # Same fork as autoreload, but it only looks — the human still decides when
-  # to publish. Strip first, then re-add: idempotent across prompts, and it
-  # picks up an RPROMPT your config sets *after* the hook line without saving
-  # a copy. No promptsubst needed — precmd runs before the prompt is rendered.
+  # The nag is on by default: forgetting to reload is the failure mode it
+  # exists for. Strip first, re-add at the end — idempotent across prompts, and
+  # it picks up an RPROMPT your config sets *after* the hook line without
+  # saving a copy. No promptsubst needed: precmd runs before the prompt is
+  # rendered.
   #
-  # --check is a fingerprint comparison, so most of what it flags publishes
-  # nothing at all (a rewritten ~/.zcompdump is the everyday one). Settling
-  # that unattended costs one capture — the same fork autoreload pays, and only
-  # while something is dirty — and never publishes: a delta a human should look
-  # at leaves the nag exactly where --check put it. The tool remembers such a
-  # delta, so the retry on the next prompt is a fingerprint check again, not a
-  # second capture. SHAREZED_NO_SETTLE keeps the nag and the fork out of it.
-  if [[ -z $SHAREZED_NO_NOTIFY ]]; then
+  # The apply goes *between* the two halves. RPROMPT is synced state now, so
+  # its guard has to see your prompt, not yours plus our nag — which would read
+  # as a local edit and pin the old prompt forever. Strip only when non-empty:
+  # assigning would create an empty RPROMPT where there was none, and "absent"
+  # is what lets a shell take a prompt the log has just grown.
+  [[ -z $SHAREZED_NO_NOTIFY && -n $RPROMPT ]] &&
     RPROMPT=${RPROMPT%"$_sharezed_segment"}
-    if ! $SHAREZED_BIN reload --channel $SHAREZED_CHANNEL --check --silent &&
-       { [[ -n $SHAREZED_NO_SETTLE ]] ||
-         ! $SHAREZED_BIN reload --channel $SHAREZED_CHANNEL --if-noop --silent }
-    then
-      RPROMPT+=$_sharezed_segment
-    fi
-  fi
-  [[ -r $SHAREZED_HEAD ]] || return 0
+
   local head
-  read -r head < $SHAREZED_HEAD || return 0
-  [[ $head == $SHAREZED_CURSOR ]] && return 0
-  if ! _sharezed_apply; then
+  if [[ -r $SHAREZED_HEAD ]] && read -r head < $SHAREZED_HEAD &&
+     [[ $head != $SHAREZED_CURSOR ]] && ! _sharezed_apply
+  then
     # ponytail: quarantine after one failure, not N. A poison entry costs a
     # message, not a dead prompt (§7.8.3).
     typeset -gx SHAREZED_DISABLE=1
     print -u2 "sharezed: apply failed at seq $head — disabled in this shell (unset SHAREZED_DISABLE to retry)"
   fi
+
+  # Same fork as autoreload, but it only looks — the human still decides when
+  # to publish. --check is a fingerprint comparison, so most of what it flags
+  # publishes nothing at all (a rewritten ~/.zcompdump is the everyday one).
+  # Settling that unattended costs one capture — the same fork autoreload pays,
+  # and only while something is dirty — and never publishes: a delta a human
+  # should look at leaves the nag exactly where --check put it. The tool
+  # remembers such a delta, so the retry on the next prompt is a fingerprint
+  # check again, not a second capture. SHAREZED_NO_SETTLE keeps the nag and the
+  # fork out of it.
+  if [[ -z $SHAREZED_NO_NOTIFY ]] &&
+     ! $SHAREZED_BIN reload --channel $SHAREZED_CHANNEL --check --silent &&
+     { [[ -n $SHAREZED_NO_SETTLE ]] ||
+       ! $SHAREZED_BIN reload --channel $SHAREZED_CHANNEL --if-noop --silent }
+  then
+    RPROMPT+=$_sharezed_segment
+  fi
+  return 0
 }
 
 autoload -Uz add-zsh-hook
