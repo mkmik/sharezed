@@ -1,6 +1,6 @@
 [package]
 name = "sharezed"
-version = "0.8.0"
+version = "0.9.0"
 edition = "2024"
 description = "direnv for everything a shell knows"
 repository = "https://github.com/mkmik/sharezed"
