@@ -29,15 +29,24 @@ publishes the same state. `SHAREZED_BOOTSTRAP` captures one file instead.
 ```zsh
 $ vim ~/.zshrc                 # add a function, drop an alias, bump a var
 $ sharezed reload
+  gen 7: would publish +2 functions, ~1 param, -1 alias
+  + func    work                     print "working in $1"
+  ...
+  publish? [y/N] y
   gen 7 → gen 8: +2 functions, ~1 param, -1 alias
 # every other terminal converges at its next prompt
 ```
 
-`reload` never asks permission — it's your own config, and a prompt you always
-answer yes to isn't a safety feature. What it does instead is *notice*. Every
-sourced file is hashed and every external command the bootstrap ran is
-fingerprinted, so `brew upgrade flux` shows up even though no file you own
-changed:
+`reload` shows you the delta and asks, because publishing reaches every shell
+you have open. Answer anything but `y` and it publishes nothing and exits 1,
+exactly like `--dry-run` — your files stay dirty and the nag stays up. `-y`
+(`--yes`) skips the question, which is what a script, a hook or a timer wants;
+without a terminal to ask, `reload` refuses rather than publishing on the
+silence.
+
+What it also does is *notice*. Every sourced file is hashed and every external
+command the bootstrap ran is fingerprinted, so `brew upgrade flux` shows up
+even though no file you own changed:
 
 ```console
 $ sharezed doctor
@@ -57,7 +66,7 @@ something moved — no shell, **3ms against 1.1s**:
 ```console
 $ sharezed reload
 gen 5: 14 files and 10 commands unchanged
-$ sharezed reload                       # after editing ~/.zsh/zmac
+$ sharezed reload -y                    # after editing ~/.zsh/zmac
 changed: /Users/mkm/.zsh/zmac
 gen 5 → gen 6: +1 function
 ```
@@ -67,7 +76,7 @@ moved: a bootstrap that reads a file it never sources, or a change to
 `SHAREZED_IGNORE`.
 
 With `--silent` it prints nothing on success — errors still go to stderr — so
-the pair is what belongs in a timer.
+`--silent -y` is what belongs in a timer.
 
 ## Being told to reload
 

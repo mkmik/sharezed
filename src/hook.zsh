@@ -100,7 +100,7 @@ _sharezed_precmd() {
   # default is that it makes pressing enter a publish action, so a half-saved
   # zshrc reaches every shell at whatever moment you next hit a prompt.
   [[ -n $SHAREZED_AUTORELOAD ]] &&
-    $SHAREZED_BIN reload --channel $SHAREZED_CHANNEL --silent
+    $SHAREZED_BIN reload --channel $SHAREZED_CHANNEL --silent --yes
   # The nag is on by default: forgetting to reload is the failure mode it
   # exists for. Strip first, re-add at the end — idempotent across prompts, and
   # it picks up an RPROMPT your config sets *after* the hook line without

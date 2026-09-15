@@ -37,7 +37,7 @@ fn dry_run_reports_without_publishing() {
     let (state, boot) = (tmp.join("state"), tmp.join("boot.zsh"));
     std::fs::create_dir_all(&state).unwrap();
     std::fs::write(&boot, "export DRY_PROBE=1\n").unwrap();
-    assert_eq!(sharezed(&state, &boot, &[]).0, 0, "first publish");
+    assert_eq!(sharezed(&state, &boot, &["-y"]).0, 0, "first publish");
 
     std::fs::write(&boot, "export DRY_PROBE=2\n").unwrap();
     let (code, out) = sharezed(&state, &boot, &["--dry-run"]);
@@ -61,7 +61,7 @@ fn dry_run_reports_without_publishing() {
 
     // The case this exists for: a tracked file changed, but the capture yields
     // no delta. `--check` says "changed"; only a dry run can say "nothing".
-    assert_eq!(sharezed(&state, &boot, &[]).0, 0, "publish the edit");
+    assert_eq!(sharezed(&state, &boot, &["-y"]).0, 0, "publish the edit");
     std::fs::write(&boot, "export DRY_PROBE=2 \n").unwrap();
     let (code, out) = sharezed(&state, &boot, &["--dry-run"]);
     assert_eq!(code, 0, "nothing to publish → exit 0: {out}");
@@ -79,7 +79,7 @@ fn if_noop_settles_the_harmless_case_and_leaves_the_real_one() {
     let (state, boot) = (tmp.join("state"), tmp.join("boot.zsh"));
     std::fs::create_dir_all(&state).unwrap();
     std::fs::write(&boot, "export NOOP_PROBE=1\n").unwrap();
-    assert_eq!(sharezed(&state, &boot, &[]).0, 0, "first publish");
+    assert_eq!(sharezed(&state, &boot, &["-y"]).0, 0, "first publish");
     let published = head(&state);
 
     // The case it exists for: a tracked file moved, the capture publishes
@@ -176,7 +176,7 @@ fn if_noop_recaptures_only_when_something_moved() {
     };
 
     write_boot("export MEMO_PROBE=1\n");
-    assert_eq!(sharezed(&state, &boot, &[]).0, 0, "first publish");
+    assert_eq!(sharezed(&state, &boot, &["-y"]).0, 0, "first publish");
 
     write_boot("export MEMO_PROBE=2\n");
     assert_eq!(sharezed(&state, &boot, &["--if-noop"]).0, 1, "delta");
@@ -196,6 +196,37 @@ fn if_noop_recaptures_only_when_something_moved() {
         "still a delta vs the published state"
     );
     assert!(captures() > n, "a changed file must be re-captured");
+
+    let _ = std::fs::remove_dir_all(&tmp);
+}
+
+/// A bare `reload` asks before it publishes, and a pipe can answer nothing —
+/// so the publish has to wait for `-y` rather than happen on the silence.
+#[test]
+fn without_yes_a_bare_reload_publishes_nothing() {
+    if !has_zsh() {
+        return;
+    }
+    let tmp = std::env::temp_dir().join(format!("sharezed-yes-{}", std::process::id()));
+    let (state, boot) = (tmp.join("state"), tmp.join("boot.zsh"));
+    std::fs::create_dir_all(&state).unwrap();
+    std::fs::write(&boot, "export YES_PROBE=1\n").unwrap();
+    assert_eq!(sharezed(&state, &boot, &["-y"]).0, 0, "first publish");
+    let published = head(&state);
+
+    std::fs::write(&boot, "export YES_PROBE=2\n").unwrap();
+    let (code, out) = sharezed(&state, &boot, &[]);
+    assert_eq!(code, 1, "unanswered → exit 1: {out}");
+    assert!(
+        out.contains("would publish") && out.contains("YES_PROBE"),
+        "{out}"
+    );
+    assert_eq!(head(&state), published, "nothing may be published");
+
+    // And the nag survives, exactly as after a dry run.
+    assert_eq!(sharezed(&state, &boot, &["--check"]).0, 1, "nag stays on");
+    assert_eq!(sharezed(&state, &boot, &["-y"]).0, 0, "-y publishes it");
+    assert_ne!(head(&state), published, "…and moves head");
 
     let _ = std::fs::remove_dir_all(&tmp);
 }

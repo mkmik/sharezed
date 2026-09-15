@@ -36,7 +36,7 @@ fn prompts_sync_and_terminal_state_does_not() {
     // PROMPT, not PS1: the same parameter under its other name, which is what
     // proves capturing one spelling is enough.
     std::fs::write(&boot, "PROMPT='old%# '\nRPROMPT='%*'\nTERM=xterm\n").unwrap();
-    assert_eq!(sharezed(&state, &boot, &[]).0, 0, "first publish");
+    assert_eq!(sharezed(&state, &boot, &["-y"]).0, 0, "first publish");
 
     std::fs::write(&boot, "PROMPT=$'\\e[7mnew%# '\nRPROMPT='%~'\nTERM=dumb\n").unwrap();
     let (code, out) = sharezed(&state, &boot, &["--dry-run"]);
@@ -71,7 +71,7 @@ fn an_apply_lands_through_the_nag_the_last_prompt_left() {
     let (state, boot) = (tmp.join("state"), tmp.join("boot.zsh"));
     std::fs::create_dir_all(&state).unwrap();
     std::fs::write(&boot, "PS1='A '\nRPROMPT='R1'\n").unwrap();
-    assert_eq!(sharezed(&state, &boot, &[]).0, 0, "gen 1");
+    assert_eq!(sharezed(&state, &boot, &["-y"]).0, 0, "gen 1");
 
     let hook = Command::new(env!("CARGO_BIN_EXE_sharezed"))
         .args(["hook", "zsh"])
@@ -81,7 +81,7 @@ fn an_apply_lands_through_the_nag_the_last_prompt_left() {
     let hook = String::from_utf8_lossy(&hook.stdout).into_owned();
 
     std::fs::write(&boot, "PS1='B '\nRPROMPT='R2'\n").unwrap();
-    assert_eq!(sharezed(&state, &boot, &[]).0, 0, "gen 2");
+    assert_eq!(sharezed(&state, &boot, &["-y"]).0, 0, "gen 2");
 
     // A shell still at gen 1, wearing the nag its last prompt put there.
     let out = Command::new("zsh")
