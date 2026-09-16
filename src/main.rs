@@ -27,28 +27,7 @@ struct Cli {
 #[derive(Subcommand)]
 enum Cmd {
     /// Clean-room capture of the bootstrap script; publish the delta.
-    Reload {
-        /// Capture even if no tracked file or command changed.
-        #[arg(long)]
-        force: bool,
-        /// Print nothing on success. Errors still go to stderr.
-        #[arg(long)]
-        silent: bool,
-        /// Report only: exit 1 if a capture would have something to do.
-        #[arg(long)]
-        check: bool,
-        /// Capture but publish nothing: show the diff and exit 1 if there is
-        /// something to publish.
-        #[arg(long, conflicts_with = "check")]
-        dry_run: bool,
-        /// Publish nothing, but if there is nothing to publish, record the
-        /// fingerprints anyway — one capture, so nothing slips in between.
-        #[arg(long, conflicts_with_all = ["check", "dry_run"])]
-        if_noop: bool,
-        /// Summary only: how much would be published, not what.
-        #[arg(short = 'p', long)]
-        plain: bool,
-    },
+    Reload(ReloadOpts),
     /// Cursor vs head, pending entries, conflicts.
     Status,
     /// Human-readable view of an entry (default: the newest).
@@ -82,6 +61,33 @@ enum Cmd {
     },
 }
 
+#[derive(clap::Args)]
+struct ReloadOpts {
+    /// Capture even if no tracked file or command changed.
+    #[arg(long)]
+    force: bool,
+    /// Print nothing on success. Errors still go to stderr.
+    #[arg(long)]
+    silent: bool,
+    /// Report only: exit 1 if a capture would have something to do.
+    #[arg(long)]
+    check: bool,
+    /// Capture but publish nothing: show the diff and exit 1 if there is
+    /// something to publish.
+    #[arg(long, conflicts_with = "check")]
+    dry_run: bool,
+    /// Publish nothing, but if there is nothing to publish, record the
+    /// fingerprints anyway — one capture, so nothing slips in between.
+    #[arg(long, conflicts_with_all = ["check", "dry_run"])]
+    if_noop: bool,
+    /// Summary only: how much would be published, not what.
+    #[arg(short = 'p', long)]
+    plain: bool,
+    /// Publish without asking — for a script, a hook, or a timer.
+    #[arg(short = 'y', long)]
+    yes: bool,
+}
+
 #[derive(Subcommand)]
 enum PathCmd {
     /// Entry-by-entry account of the local vs published PATH.
@@ -99,14 +105,7 @@ fn main() {
 fn run(cli: &Cli) -> R {
     let ch = &cli.channel;
     match &cli.command {
-        Cmd::Reload {
-            force,
-            silent,
-            check,
-            dry_run,
-            if_noop,
-            plain,
-        } => reload(ch, *force, *silent, *check, *dry_run, *if_noop, *plain),
+        Cmd::Reload(o) => reload(ch, o),
         Cmd::Status => status(ch),
         Cmd::Diff { seq } => diff(ch, *seq),
         Cmd::Log => log(ch),
@@ -169,15 +168,16 @@ fn cursor_env() -> u64 {
 
 // --- producer ---------------------------------------------------------------
 
-fn reload(
-    channel: &str,
-    force: bool,
-    silent: bool,
-    check: bool,
-    dry_run: bool,
-    if_noop: bool,
-    plain: bool,
-) -> R {
+fn reload(channel: &str, o: &ReloadOpts) -> R {
+    let &ReloadOpts {
+        force,
+        silent,
+        check,
+        dry_run,
+        if_noop,
+        plain,
+        yes,
+    } = o;
     // Errors keep going to stderr: silent is about routine chatter on a timer,
     // not about hiding a broken bootstrap.
     let say = |msg: String| {
@@ -262,15 +262,7 @@ fn reload(
         return Ok(());
     }
     validate(&changes)?;
-    // Fingerprints stay stale here on purpose: nothing was published, so the
-    // nag has to survive — there is a real delta waiting for a human.
-    if dry_run || if_noop {
-        if if_noop {
-            store.save_meta(&store::Meta {
-                stalled: digest,
-                ..meta
-            })?;
-        }
+    let show = || {
         say(format!(
             "gen {head}: would publish {}",
             state::summary(&changes)
@@ -282,7 +274,27 @@ fn reload(
                 say(describe(c));
             }
         }
+    };
+    // Fingerprints stay stale in every path that publishes nothing — a dry run,
+    // an `--if-noop`, or a human answering no: the nag has to survive, there is
+    // a real delta waiting for one.
+    if dry_run || if_noop {
+        if if_noop {
+            store.save_meta(&store::Meta {
+                stalled: digest,
+                ..meta
+            })?;
+        }
+        show();
         std::process::exit(1);
+    }
+    // Same report, then the question — publishing reaches every shell you have
+    // open, so the default is to look before it does.
+    if !yes {
+        show();
+        if !confirm() {
+            std::process::exit(1);
+        }
     }
     let seq = store.publish(&changes, &desired)?;
     // After the publish, never before: a fingerprint recorded for a generation
@@ -294,6 +306,25 @@ fn reload(
     ));
     say(format!("published to channel '{channel}'"));
     Ok(())
+}
+
+/// A pipe can say neither yes nor no, so it counts as no: `--yes` is how you
+/// mean yes without a terminal, and it keeps a cron job from hanging on a
+/// question nobody will read.
+fn confirm() -> bool {
+    use std::io::IsTerminal;
+    if !std::io::stdin().is_terminal() {
+        eprintln!("sharezed: not a terminal — re-run with --yes to publish");
+        return false;
+    }
+    print!("publish? [y/N] ");
+    let _ = std::io::stdout().flush();
+    let mut answer = String::new();
+    if std::io::stdin().read_line(&mut answer).is_err() {
+        return false;
+    }
+    let a = answer.trim();
+    a.eq_ignore_ascii_case("y") || a.eq_ignore_ascii_case("yes")
 }
 
 /// Refuse to publish a payload that a bare zsh can't even parse (§7.8.1).
