@@ -106,11 +106,14 @@ _sz_dump() {
   # yours, and there is exactly one kind of function that qualifies: one your
   # config defined. On a stock compinit that filter keeps 0 of 1874. Without
   # them a new completion syncs its function and nothing binds it to a command.
+  # An entry is a command line, not always a bare name: bashcompinit's
+  # `complete` stores `_bash_complete -o default -F _foo`. Judge it by its
+  # first word, publish it whole.
   for name in ${(k)_comps}; do
-    target=$_comps[$name]
+    target=${_comps[$name]%% *}
     (( ${+functions[$target]} )) || continue
     _sz_is_autoload $target && continue
-    print -rN -- compdef "$name" "" 1 "$target"
+    print -rN -- compdef "$name" "" 1 "$_comps[$name]"
   done
   for name attrs in ${(kv)aliases};  do print -rN -- alias  "$name" "" 1 "$attrs"; done
   for name attrs in ${(kv)galiases}; do print -rN -- galias "$name" "" 1 "$attrs"; done

@@ -128,7 +128,9 @@ fn hand_written_completions_publish_but_fpath_stubs_do_not() {
             "fpath+=('{}')\n\
              autoload -Uz _stubby\n\
              _probe_comp() {{ print hi }}\n\
-             typeset -gA _comps=( probecmd _probe_comp stubby _stubby )\n",
+             _bashy_driver() {{ : }}\n\
+             typeset -gA _comps=( probecmd _probe_comp stubby _stubby \
+             bashcmd '_bashy_driver -o default -F _probe_comp' )\n",
             fp.display()
         ),
     )
@@ -143,6 +145,10 @@ fn hand_written_completions_publish_but_fpath_stubs_do_not() {
     assert!(
         out.contains("compdef probecmd"),
         "and the binding that makes it reachable: {out}"
+    );
+    assert!(
+        out.contains("compdef bashcmd"),
+        "a bashcompinit `complete` binding, whose entry carries args: {out}"
     );
     assert!(
         !out.contains("stubby"),
