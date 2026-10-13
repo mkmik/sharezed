@@ -331,7 +331,11 @@ mod tests {
         let on = change(Kind::Setopt, "extendedglob", "", Some(&["on"]), None);
         let gone = change(Kind::Setopt, "extendedglob", "", None, Some(&["on"]));
         let off = change(Kind::Setopt, "beep", "", None, Some(&["off"]));
-        let p = generate(&[(1, vec![on]), (2, vec![gone, off])], &mut State::new(), &[]);
+        let p = generate(
+            &[(1, vec![on]), (2, vec![gone, off])],
+            &mut State::new(),
+            &[],
+        );
         assert!(p.contains("\nsetopt extendedglob\n"), "{p}");
         assert!(p.contains("\nunsetopt extendedglob\n"), "{p}");
         assert!(p.contains("\nsetopt beep\n"), "{p}");
