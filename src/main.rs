@@ -965,7 +965,7 @@ mod tests {
             "export EDITOR=acme\nMYTOKEN=sekrit\nalias gs='git status'\n\
              work() { print \"working in $1\" }\ntypeset -a mylist=(a b)\npath=(/opt/x $path)\n\
              export SHAREZED_NOTIFY=1\nexport SHAREZED_CURSOR=99\n\
-             _sharezed_precmd() { : }\n",
+             _sharezed_precmd() { : }\nsetopt extendedglob\nunsetopt beep\n",
         )
         .unwrap();
         let cap = capture::clean_room(Some(&boot)).unwrap();
@@ -1011,6 +1011,13 @@ mod tests {
         assert!(
             !d.contains_key(&(Kind::Func, "_sz_dump".into())),
             "harness must not leak"
+        );
+        assert_eq!(get(Kind::Setopt, "extendedglob"), Some(vec!["on".into()]));
+        assert_eq!(get(Kind::Setopt, "beep"), Some(vec!["off".into()]));
+        assert_eq!(
+            d.keys().filter(|k| k.0 == Kind::Setopt).count(),
+            2,
+            "only what the bootstrap flipped — not xtrace, not emulate's reset"
         );
     }
 }
