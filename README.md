@@ -27,7 +27,7 @@ calling terminal injected can reach the capture, so reloading from two windows
 publishes the same state. `SHAREZED_BOOTSTRAP` captures one file instead.
 
 ```zsh
-$ vim ~/.zshrc                 # add a function, drop an alias, bump a var
+$ vim ~/.zshrc                 # add a function, drop an alias, bump a var, drop a setopt
 $ sharezed reload
   gen 7: would publish +2 functions, ~1 param, -1 alias
   + func    work                     print "working in $1"

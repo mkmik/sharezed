@@ -63,6 +63,7 @@ fn set_stmt(c: &Change, vals: &[String]) -> Option<String> {
             zq(&c.name)
         ),
         _ if !valid_name(&c.name) => return None,
+        Kind::Setopt => setopt(&c.name, &one()),
         Kind::Scalar => format!(
             "typeset {} {}={}",
             flags(c.kind, &c.attrs),
@@ -91,9 +92,19 @@ fn unset_stmt(c: &Change) -> Option<String> {
             "(( $+functions[compdef] )) && compdef -d -- {}",
             zq(&c.name)
         ),
-        _ if valid_name(&c.name) => format!("unset {}", c.name),
-        _ => return None,
+        _ if !valid_name(&c.name) => return None,
+        // Gone from the desired state means back to the clean-shell default,
+        // and the capture only records an option that differs from it.
+        Kind::Setopt => {
+            let old = c.old.as_ref()?.first()?;
+            setopt(&c.name, if old == "on" { "off" } else { "on" })
+        }
+        _ => format!("unset {}", c.name),
     })
+}
+
+fn setopt(name: &str, val: &str) -> String {
+    format!("{} {name}", if val == "on" { "setopt" } else { "unsetopt" })
 }
 
 /// A guarded statement: apply only if this key is still what sharezed put
@@ -203,7 +214,11 @@ pub fn generate(entries: &[(u64, Vec<Change>)], ours: &mut State, families: &[Pa
                     // per-key policy). Guarding them means a shell holding the
                     // hook its own zshrc installed reads as a local edit, so it
                     // would keep an old hook forever. Nobody hand-edits these.
-                    if c.name.starts_with("_sharezed_") {
+                    //
+                    // Options are unguarded too: an option is never absent, so
+                    // a shell can't tell "still at the default" from "you set it
+                    // back by hand", and every shell starts at the default.
+                    if c.name.starts_with("_sharezed_") || c.kind == Kind::Setopt {
                         code.push_str(&stmt);
                         code.push('\n');
                     } else {
@@ -309,6 +324,18 @@ mod tests {
             p.contains("(( $+functions[compdef] )) && compdef -d -- 'ccwt'"),
             "{p}"
         );
+    }
+
+    #[test]
+    fn a_dropped_setopt_reverts_to_the_default() {
+        let on = change(Kind::Setopt, "extendedglob", "", Some(&["on"]), None);
+        let gone = change(Kind::Setopt, "extendedglob", "", None, Some(&["on"]));
+        let off = change(Kind::Setopt, "beep", "", None, Some(&["off"]));
+        let p = generate(&[(1, vec![on]), (2, vec![gone, off])], &mut State::new(), &[]);
+        assert!(p.contains("\nsetopt extendedglob\n"), "{p}");
+        assert!(p.contains("\nunsetopt extendedglob\n"), "{p}");
+        assert!(p.contains("\nsetopt beep\n"), "{p}");
+        assert!(!p.contains("_sharezed_eq"), "options are unguarded: {p}");
     }
 
     #[test]

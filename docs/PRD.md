@@ -62,7 +62,7 @@ consumer:  precmd hook ── head != cursor? ──▶ apply Δ(cursor..head] �
 - Cross-user or cross-host sync. Single uid, single machine.
 - bash/fish. (Architecture shouldn't preclude them; the capture layer is shell-specific by design.)
 - Replacing direnv. sharezed is machine/user-scoped; direnv stays directory-scoped. See §12.
-- **Everything outside the four kinds in G1.** Specifically out: shell options (`setopt`), named directories (`hash -d`), key bindings (`bindkey`), traps, and the completion *system* — `_patcomps`, `_services`, the `$fpath` stubs `compinit` autoloads, and the ~1900 `_comps` entries it builds from their `#compdef` tags, all of which every shell rebuilds for itself. A completion your zshrc *writes* is not that, and does sync: the `_ccwt` that `ccwt init zsh` defines is an ordinary function, one of the four kinds, and the `compdef` binding it to a command rides along as a fifth. The filter is "does this `_comps` entry point at a function we are carrying" — 5 of 1874 on a real zshrc. Options in particular were considered and cut: they are the highest-risk category (a stray `setopt` mode change is far harder to notice and diagnose than a wrong variable) for the least benefit.
+- **Everything outside the four kinds in G1.** Specifically out: named directories (`hash -d`), key bindings (`bindkey`), traps, and the completion *system* — `_patcomps`, `_services`, the `$fpath` stubs `compinit` autoloads, and the ~1900 `_comps` entries it builds from their `#compdef` tags, all of which every shell rebuilds for itself. A completion your zshrc *writes* is not that, and does sync: the `_ccwt` that `ccwt init zsh` defines is an ordinary function, one of the four kinds, and the `compdef` binding it to a command rides along as a fifth. The filter is "does this `_comps` entry point at a function we are carrying" — 5 of 1874 on a real zshrc. Options were cut in v3 as the highest-risk category (a stray `setopt` mode change is far harder to notice than a wrong variable) and later came back as a sixth kind, `option`: commenting out `setopt extendedglob` and getting nothing in your open shells turned out to be the more common failure. Only options the bootstrap flips away from a clean shell's default are recorded, so a removal means "back to the default" and applies as the opposite `setopt`. They apply unguarded — an option is never absent, so there is no local edit to tell apart from the default.
 
 ## 4. Terminology
 
@@ -122,9 +122,9 @@ PWD  -> scalar-export                  # NOT flagged special!
 
 Neither `special` nor `!special` is the right filter. The rule: **denylist by name (§5.2) + skip `readonly`/`local` + an explicit allowlist of special params worth syncing** (`PATH`, `FPATH`, `MANPATH`, `CDPATH`, `LD_LIBRARY_PATH`, prompt params if opted in).
 
-**(b) ~~`emulate -L zsh` masks the caller's options~~ — retired by the scope cut.**
+**(b) `emulate -L zsh` masks the caller's options — load-bearing again now that options sync.**
 
-Measured and real (`$options[extendedglob]` reads `off` after `emulate -L zsh` when the caller had it `on`), but it only bites a harness that captures `$options`, which this one no longer does. `emulate -L zsh` does not perturb `$parameters`, `$functions`, or `$aliases`, so the harness can keep it for its own hygiene. Recorded because the general lesson still applies — **capture before you perturb** — and because it becomes load-bearing again the moment options come back into scope.
+Measured and real (`$options[extendedglob]` reads `off` after `emulate -L zsh` when the caller had it `on`), and it bites any harness that captures `$options` — which this one does, so `_sz_dump` copies `$options` before its `emulate -L zsh`. `emulate -L zsh` does not perturb `$parameters`, `$functions`, or `$aliases`, so the harness can keep it for its own hygiene. Recorded because the general lesson still applies — **capture before you perturb** — and because it becomes load-bearing again the moment options come back into scope.
 
 **(c) Tied params: apply the scalar side — EXCEPT for `path`. ⟵ correction to v1.**
 

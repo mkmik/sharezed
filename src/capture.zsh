@@ -46,10 +46,24 @@ _sz_is_autoload() {
   [[ -n $src && ${src:t} == $1 ]] && (( ${fpath[(Ie)${src:h}]} ))
 }
 
+# Options the shell sets for itself (how it was started, what the harness
+# traces with) or that would make the apply function's own setopts local.
+typeset -ga _sz_opt_deny=(
+  interactive login shinstdin singlecommand privileged restricted monitor zle
+  rcs globalrcs xtrace sourcetrace localoptions localtraps localloops
+  localpatterns
+)
+
 _sz_dump() {
-  emulate -L zsh   # safe: nothing captured here is option-sensitive (§5.4b)
+  # Capture before you perturb (§5.4b): `emulate -L` below resets $options.
+  local -A _sz_o=( "${(@kv)options}" )
+  emulate -L zsh
   local name attrs k target
   local -a v
+  for name in ${(ko)_sz_o}; do
+    (( ${_sz_opt_deny[(Ie)$name]} )) && continue
+    print -rN -- option "$name" "" 1 "$_sz_o[$name]"
+  done
   for name attrs in ${(kv)parameters}; do
     (( ${_sz_deny[(Ie)$name]} )) && continue
     # Only the hook's *own* per-shell state is excluded (§5.3) — a shared

@@ -17,6 +17,9 @@ pub enum Kind {
     /// A `compdef` binding: `name` is the command, the value the completion
     /// function. The rest of `_comps` is compinit's own and never syncs.
     Compdef,
+    /// A `setopt` the bootstrap flipped away from a clean shell's default:
+    /// `name` as `$options` spells it, the value `on` or `off`.
+    Setopt,
 }
 
 impl Kind {
@@ -32,6 +35,7 @@ impl Kind {
             Kind::Galias => "galias",
             Kind::Salias => "salias",
             Kind::Compdef => "compdef",
+            Kind::Setopt => "option",
         }
     }
 }
@@ -110,6 +114,7 @@ pub fn parse_wire(buf: &[u8]) -> Result<State, String> {
             ("galias", _) => Kind::Galias,
             ("salias", _) => Kind::Salias,
             ("compdef", _) => Kind::Compdef,
+            ("option", _) => Kind::Setopt,
             (k, _) => return Err(format!("unknown kind {k:?}")),
         };
         state.insert(
@@ -219,6 +224,7 @@ pub fn summary(changes: &[Change]) -> String {
             &[Kind::Alias, Kind::Galias, Kind::Salias][..],
         ),
         ("compdef", "compdefs", &[Kind::Compdef][..]),
+        ("option", "options", &[Kind::Setopt][..]),
     ] {
         let of = |f: &dyn Fn(&Change) -> bool| {
             changes
