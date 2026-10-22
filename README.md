@@ -162,7 +162,8 @@ Files are compared by content, so `touch` alone doesn't trigger a capture.
 Adding a `source` line or a new command means editing a file that is already
 tracked, so it shows up here first.
 
-`sharezed status` · `log` · `diff [N]` · `revert N` · `path explain` · `doctor`.
+`sharezed status` · `log` · `diff [N]` · `revert N` · `path explain` · `doctor`
+· `stats`.
 `SHAREZED_DISABLE=1` is the kill switch; `SHAREZED_IGNORE='*TOKEN* *SECRET*'`
 drops keys at capture time; `SHAREZED_BOOTSTRAP` captures one file instead of
 the startup sequence.
@@ -189,6 +190,28 @@ Convergence is **precmd-only, by design**: a shell catches up before its next
 command, not while sitting idle at the prompt. PRD §7.5's `zle -F` path would
 buy an fd and a handler per shell to close a window that ends the moment you
 press enter. Not worth it.
+
+## Is it slowing my prompt?
+
+The hook times itself at every prompt and appends one line to `timings` in
+the channel's state directory: how long the whole precmd took, and each fork
+inside it. Writing that line costs ~50µs and is the one thing it doesn't time.
+At ~1 MB the file moves to `timings.1`, so it never grows past two of them.
+
+```console
+$ sharezed stats
+3412 prompts, from /Users/mkm/.local/state/sharezed/user/timings
+              n      mean       p50       p95       p99       max
+precmd     3412     2.6ms     2.1ms     3.0ms     9.8ms  1180.4ms
+check      3412     2.0ms     1.9ms     2.6ms     4.1ms    12.2ms
+settle        9   960.3ms  1010.7ms  1180.0ms  1180.0ms  1180.0ms
+apply        14    21.5ms    18.0ms    40.2ms    40.2ms    40.2ms
+```
+
+`precmd` is the stall you feel. `check` runs at every prompt; `settle` is the
+capture behind `--if-noop`, so it only runs while a fingerprint is dirty;
+`apply` runs when a shell catches up to a new generation; `reload` only with
+`SHAREZED_AUTORELOAD`.
 
 ## Upgrading
 

@@ -53,6 +53,8 @@ enum Cmd {
         #[command(subcommand)]
         cmd: PathCmd,
     },
+    /// How long the hook holds up your prompt: mean and percentiles, per step.
+    Stats,
     /// Diagnose hook order, perms, stale cursors, dead PATH dirs.
     Doctor {
         /// Also report PATH entries whose directory is gone (§8.10).
@@ -113,6 +115,7 @@ fn run(cli: &Cli) -> R {
         Cmd::Hook { .. } => hook(ch),
         Cmd::Revert { seq } => revert(ch, *seq),
         Cmd::Path { .. } => path_explain(ch),
+        Cmd::Stats => stats(ch),
         Cmd::Doctor { prune_missing } => doctor(ch, *prune_missing),
     }
 }
@@ -682,6 +685,62 @@ fn path_explain(channel: &str) -> R {
     }
     for n in &m.notes {
         println!("  note: {n}");
+    }
+    Ok(())
+}
+
+/// The hook appends `epoch total_µs step:µs…` per prompt; see `_sharezed_record`.
+fn stats(channel: &str) -> R {
+    let store = Store::open(channel)?;
+    let path = store.dir.join("timings");
+    // The rotated file too: right after a rotation the live one is nearly empty.
+    let text: String = [path.with_extension("1"), path.clone()]
+        .iter()
+        .map(|p| std::fs::read_to_string(p).unwrap_or_default())
+        .collect();
+    // `precmd` is the whole stall; the rest are the forks inside it.
+    let mut rows: Vec<(&str, Vec<u64>)> = ["precmd", "check", "settle", "apply", "reload"]
+        .into_iter()
+        .map(|s| (s, Vec::new()))
+        .collect();
+    for line in text.lines() {
+        let mut w = line.split_whitespace().skip(1);
+        let Some(Ok(total)) = w.next().map(str::parse) else {
+            continue;
+        };
+        rows[0].1.push(total);
+        for (step, us) in w.filter_map(|s| s.split_once(':')) {
+            if let (Some(row), Ok(us)) = (rows.iter_mut().find(|r| r.0 == step), us.parse()) {
+                row.1.push(us);
+            }
+        }
+    }
+    if rows[0].1.is_empty() {
+        println!(
+            "no timings in {} yet — the hook writes one line per prompt",
+            path.display()
+        );
+        return Ok(());
+    }
+    println!("{} prompts, from {}", rows[0].1.len(), path.display());
+    println!(
+        "{:<8}{:>7}{:>10}{:>10}{:>10}{:>10}{:>10}",
+        "", "n", "mean", "p50", "p95", "p99", "max"
+    );
+    let ms = |us: u64| format!("{:.1}ms", us as f64 / 1000.0);
+    for (step, mut v) in rows.into_iter().filter(|r| !r.1.is_empty()) {
+        v.sort_unstable();
+        // Nearest rank: the slowest prompt the p-th percentile has to cover.
+        let pct = |p: f64| v[((p * v.len() as f64).ceil() as usize).max(1) - 1];
+        println!(
+            "{step:<8}{:>7}{:>10}{:>10}{:>10}{:>10}{:>10}",
+            v.len(),
+            ms(v.iter().sum::<u64>() / v.len() as u64),
+            ms(pct(0.50)),
+            ms(pct(0.95)),
+            ms(pct(0.99)),
+            ms(v[v.len() - 1]),
+        );
     }
     Ok(())
 }
