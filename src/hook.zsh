@@ -1,5 +1,6 @@
 # sharezed shell integration (PRD §7.5). Printed by `sharezed hook zsh`.
-# Steady state is one open+read of an ~8-byte file and zero forks.
+# Steady state is a read of an ~8-byte file, one fork for `reload --check`, and
+# one line appended to the timings `sharezed stats` reads.
 
 zmodload zsh/parameter
 
@@ -90,17 +91,52 @@ _sharezed_apply() {
   eval "$out"
 }
 
+# --- timings: is a slow prompt ours? ---------------------------------------
+
+# step cmd... -> runs cmd, keeping its status, and adds `step:µs` to the
+# caller's _sharezed_ran. The locals are prefixed because the apply evals
+# `typeset -g` for names your config owns, and that lands on a local of the
+# same name in any calling frame.
+_sharezed_timed() {
+  local _sharezed_t=$EPOCHREALTIME _sharezed_rc
+  local -i _sharezed_us
+  "${@:2}"
+  _sharezed_rc=$?
+  (( _sharezed_us = (EPOCHREALTIME - _sharezed_t) * 1e6 ))
+  _sharezed_ran+=( "$1:$_sharezed_us" )
+  return $_sharezed_rc
+}
+
+# t0 steps... -> one line per prompt for `sharezed stats`: epoch seconds, µs
+# since t0, then the steps. A single O_APPEND write, so shells don't interleave.
+_sharezed_record() {
+  setopt localoptions extendedglob
+  local f=${SHAREZED_HEAD:h}/timings
+  local -i us
+  (( us = (EPOCHREALTIME - $1) * 1e6 ))
+  { print -r -- "$EPOCHSECONDS $us ${@:2}" >> $f } 2>/dev/null
+  # ~1MB is ~35k prompts. The previous file is kept, so stats never restart
+  # from nothing, and the one fork it costs is paid once per file.
+  [[ -n $f(#qNLk+1024) ]] && command mv -f $f $f.1 2>/dev/null
+  return 0
+}
+
 _sharezed_precmd() {
   [[ -n $SHAREZED_DISABLE ]] && return 0
   # A moved or uninstalled binary must go quiet, not report an exec failure on
   # every prompt — which is what a default-on notify would otherwise do.
   [[ -x $SHAREZED_BIN ]] || return 0
+  # Here, not at the top of the file: a shell that took this hook from the log
+  # never ran the top of the file.
+  (( ${+EPOCHREALTIME} )) || zmodload zsh/datetime
+  local _sharezed_t0=$EPOCHREALTIME
+  local -a _sharezed_ran
   # Opt-in: publish your own config changes without typing `reload`. Costs a
   # fork and ~6ms per prompt, which is invisible — the reason it is off by
   # default is that it makes pressing enter a publish action, so a half-saved
   # zshrc reaches every shell at whatever moment you next hit a prompt.
   [[ -n $SHAREZED_AUTORELOAD ]] &&
-    $SHAREZED_BIN reload --channel $SHAREZED_CHANNEL --silent --yes
+    _sharezed_timed reload $SHAREZED_BIN reload --channel $SHAREZED_CHANNEL --silent --yes
   # The nag is on by default: forgetting to reload is the failure mode it
   # exists for. Strip first, re-add at the end — idempotent across prompts, and
   # it picks up an RPROMPT your config sets *after* the hook line without
@@ -117,7 +153,7 @@ _sharezed_precmd() {
 
   local head
   if [[ -r $SHAREZED_HEAD ]] && read -r head < $SHAREZED_HEAD &&
-     [[ $head != $SHAREZED_CURSOR ]] && ! _sharezed_apply
+     [[ $head != $SHAREZED_CURSOR ]] && ! _sharezed_timed apply _sharezed_apply
   then
     # ponytail: quarantine after one failure, not N. A poison entry costs a
     # message, not a dead prompt (§7.8.3).
@@ -135,12 +171,14 @@ _sharezed_precmd() {
   # check again, not a second capture. SHAREZED_NO_SETTLE keeps the nag and the
   # fork out of it.
   if [[ -z $SHAREZED_NO_NOTIFY ]] &&
-     ! $SHAREZED_BIN reload --channel $SHAREZED_CHANNEL --check --silent &&
+     ! _sharezed_timed check $SHAREZED_BIN reload --channel $SHAREZED_CHANNEL --check --silent &&
      { [[ -n $SHAREZED_NO_SETTLE ]] ||
-       ! $SHAREZED_BIN reload --channel $SHAREZED_CHANNEL --if-noop --silent }
+       ! _sharezed_timed settle $SHAREZED_BIN reload --channel $SHAREZED_CHANNEL --if-noop --silent }
   then
     RPROMPT+=$_sharezed_segment
   fi
+  # Last, so writing the line is the one thing it doesn't time.
+  _sharezed_record $_sharezed_t0 $_sharezed_ran
   return 0
 }
 
