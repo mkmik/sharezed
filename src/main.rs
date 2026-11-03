@@ -1024,7 +1024,15 @@ mod tests {
             "export EDITOR=acme\nMYTOKEN=sekrit\nalias gs='git status'\n\
              work() { print \"working in $1\" }\ntypeset -a mylist=(a b)\npath=(/opt/x $path)\n\
              export SHAREZED_NOTIFY=1\nexport SHAREZED_CURSOR=99\n\
-             _sharezed_precmd() { : }\nsetopt extendedglob\nunsetopt beep\n",
+             _sharezed_precmd() { : }\nsetopt extendedglob\nunsetopt beep\n\
+             autoload edit-command-line; zle -N edit-command-line\nbindkey -d\n\
+             bindkey -r a\nbindkey -R b-c backward-char\nbindkey '\\C-x\\C-e' edit-command-line\nbindkey '^U' backward-kill-line\n\
+             bindkey -r '^Q'\nbindkey -v\nautoload -Uz compinit; compinit -C -D\n\
+             bindkey -M emacs '^I' menu-complete\nzle -N -- -w work\n\
+             zle -A .accept-line saved\n\
+             setopt nounset\nzle -l >/dev/null\nbuiltin zle -A accept-line saved2\n\
+             zle -N accept-line work\nunsetopt nounset\nexport AFTER_ZLE=1\n\
+             bindkey -D viopp\n",
         )
         .unwrap();
         let cap = capture::clean_room(Some(&boot)).unwrap();
@@ -1078,5 +1086,107 @@ mod tests {
             2,
             "only what the bootstrap flipped — not xtrace, not emulate's reset"
         );
+        assert_eq!(get(Kind::Zle, "edit-command-line"), Some(vec!["-N".into()]));
+        let bk = |n: &str| {
+            d.get(&(Kind::Bindkey, n.to_string()))
+                .map(|i| (i.attrs.clone(), i.vals.clone()))
+        };
+        assert_eq!(
+            bk("emacs ^X^E"),
+            Some((String::new(), vec!["edit-command-line".into()]))
+        );
+        assert_eq!(
+            bk("emacs ^U"),
+            Some(("kill-whole-line".into(), vec!["backward-kill-line".into()]))
+        );
+        assert_eq!(
+            bk("emacs ^Q"),
+            Some(("push-line".into(), vec![])),
+            "unbound"
+        );
+        assert_eq!(bk("main"), Some(("emacs".into(), vec!["viins".into()])));
+        // Inside the self-insert range, which the listing only ever shows
+        // folded: a key taken out of it, and two put back in as one.
+        assert_eq!(bk("emacs a"), Some(("self-insert".into(), vec![])));
+        for k in ["emacs b", "emacs c"] {
+            assert_eq!(
+                bk(k),
+                Some(("self-insert".into(), vec!["backward-char".into()]))
+            );
+        }
+        assert_eq!(
+            bk("emacs ^I"),
+            Some(("expand-or-complete".into(), vec!["menu-complete".into()])),
+            "a binding to a completion widget is still yours"
+        );
+        assert_eq!(get(Kind::Zle, "-w"), Some(vec!["-N".into(), "work".into()]));
+        // Saved before the override, so it is the builtin, not `work`.
+        for w in ["saved", "saved2"] {
+            assert_eq!(
+                get(Kind::Zle, w),
+                Some(vec!["-A".into(), ".accept-line".into()]),
+                "{w}"
+            );
+        }
+        assert_eq!(get(Kind::Scalar, "AFTER_ZLE"), Some(vec!["1".into()]));
+        assert_eq!(
+            get(Kind::Array, "zle_bracketed_paste"),
+            None,
+            "loading ZLE is not a change"
+        );
+        assert!(
+            !d.keys()
+                .any(|k| k.0 == Kind::Bindkey && k.1.starts_with("viopp ")),
+            "a deleted keymap is not every key unbound"
+        );
+        assert!(
+            get(Kind::Zle, "menu-complete").is_some_and(|v| v[0] == "-C"),
+            "compinit's widgets ride along"
+        );
+    }
+
+    /// ZLE loads on first use and picks `main` from $VISUAL as it does, so the
+    /// capture must not load it before the bootstrap runs.
+    #[test]
+    fn keymap_follows_a_visual_the_bootstrap_sets() {
+        if !has_zsh() {
+            return;
+        }
+        let dir = std::env::temp_dir().join(format!("sharezed-zle-{}", std::process::id()));
+        std::fs::create_dir_all(&dir).unwrap();
+        std::fs::write(dir.join("_my_widget"), "zle beginning-of-line\n").unwrap();
+        std::fs::write(dir.join("_my_complete"), "compadd x\n").unwrap();
+        let boot = dir.join("boot.zsh");
+        std::fs::write(
+            &boot,
+            format!(
+                "export VISUAL=vim\nbindkey '^G' backward-char\nfpath=({} $fpath)\n\
+                 autoload -Uz _my_widget\nzle -N my-widget _my_widget\n\
+                 autoload -Uz _my_complete\nzle -C my-complete complete-word _my_complete\n\
+                 export line=hello\n",
+                dir.display()
+            ),
+        )
+        .unwrap();
+        let cap = capture::clean_room(Some(&boot)).unwrap();
+        let d = state::effect(&cap.s0, &cap.s1, &[]);
+        let _ = std::fs::remove_dir_all(&dir);
+        let get = |k: Kind, n: &str| d.get(&(k, n.to_string())).map(|i| i.vals.clone());
+        assert_eq!(get(Kind::Bindkey, "main"), Some(vec!["viins".into()]));
+        assert_eq!(
+            get(Kind::Bindkey, "viins ^G"),
+            Some(vec!["backward-char".into()])
+        );
+        assert_eq!(get(Kind::Bindkey, "emacs ^G"), None);
+        assert!(
+            d.contains_key(&(Kind::Autoload, "_my_widget".into())),
+            "a widget's function is carried even when `_`-named"
+        );
+        assert!(
+            d.contains_key(&(Kind::Autoload, "_my_complete".into())),
+            "so is a completion widget's, unless zsh ships it"
+        );
+        assert!(!d.contains_key(&(Kind::Autoload, "_main_complete".into())));
+        assert_eq!(get(Kind::Scalar, "line"), Some(vec!["hello".into()]));
     }
 }
