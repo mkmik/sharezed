@@ -20,6 +20,13 @@ pub enum Kind {
     /// A `setopt` the bootstrap flipped away from a clean shell's default:
     /// `name` as `$options` spells it, the value `on` or `off`.
     Setopt,
+    /// A widget `zle -N` made: the value is the rest of that command line.
+    Zle,
+    /// A key binding that differs from a clean shell's: `name` is
+    /// `keymap key`, the value a widget, `-s string`, or nothing for a key
+    /// the bootstrap unbound; attrs is the default it replaced. `main` alone
+    /// is the keymap `main` links to — what `bindkey -v` changes.
+    Bindkey,
 }
 
 impl Kind {
@@ -36,6 +43,8 @@ impl Kind {
             Kind::Salias => "salias",
             Kind::Compdef => "compdef",
             Kind::Setopt => "option",
+            Kind::Zle => "zle",
+            Kind::Bindkey => "bindkey",
         }
     }
 }
@@ -115,6 +124,8 @@ pub fn parse_wire(buf: &[u8]) -> Result<State, String> {
             ("salias", _) => Kind::Salias,
             ("compdef", _) => Kind::Compdef,
             ("option", _) => Kind::Setopt,
+            ("zle", _) => Kind::Zle,
+            ("bindkey", _) => Kind::Bindkey,
             (k, _) => return Err(format!("unknown kind {k:?}")),
         };
         state.insert(
@@ -225,6 +236,8 @@ pub fn summary(changes: &[Change]) -> String {
         ),
         ("compdef", "compdefs", &[Kind::Compdef][..]),
         ("option", "options", &[Kind::Setopt][..]),
+        ("widget", "widgets", &[Kind::Zle][..]),
+        ("binding", "bindings", &[Kind::Bindkey][..]),
     ] {
         let of = |f: &dyn Fn(&Change) -> bool| {
             changes

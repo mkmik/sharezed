@@ -27,7 +27,7 @@ calling terminal injected can reach the capture, so reloading from two windows
 publishes the same state. `SHAREZED_BOOTSTRAP` captures one file instead.
 
 ```zsh
-$ vim ~/.zshrc                 # add a function, drop an alias, bump a var, drop a setopt
+$ vim ~/.zshrc                 # add a function, drop an alias, bump a var, drop a setopt, bind a key
 $ sharezed reload
   gen 7: would publish +2 functions, ~1 param, -1 alias
   + func    work                     print "working in $1"
@@ -238,8 +238,6 @@ eval "$(sharezed hook zsh)"
 ## Not implemented yet
 
 - `capture --from-current` (publish a live shell's state).
-- Real pty capture: `zsh -f -i -c` sets `interactive`, but ZLE-only config
-  (`bindkey`, `zle -N`) still fails. PRD open question 1.
 - The hand-rolled startup sequence approximates zsh's own. Verified
   byte-identical to `zsh -l -i` on a real config, but `ZDOTDIR` edge cases and
   `/etc/zsh*` in unusual locations are untested.

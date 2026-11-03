@@ -62,6 +62,8 @@ fn set_stmt(c: &Change, vals: &[String]) -> Option<String> {
             zq(&one()),
             zq(&c.name)
         ),
+        Kind::Zle => zle(&c.name, vals)?,
+        Kind::Bindkey => bindkey(&c.name, vals)?,
         _ if !valid_name(&c.name) => return None,
         Kind::Setopt => setopt(&c.name, &one()),
         Kind::Scalar => format!(
@@ -92,6 +94,15 @@ fn unset_stmt(c: &Change) -> Option<String> {
             "(( $+functions[compdef] )) && compdef -d -- {}",
             zq(&c.name)
         ),
+        Kind::Zle => zle_restore(&c.name),
+        // Like an option: gone means the default it replaced, carried in attrs.
+        Kind::Bindkey => match c.attrs.as_str() {
+            "" => bindkey(&c.name, &[])?,
+            a => match a.strip_prefix("-s ") {
+                Some(s) => bindkey(&c.name, &["-s".into(), s.into()])?,
+                None => bindkey(&c.name, std::slice::from_ref(&c.attrs))?,
+            },
+        },
         _ if !valid_name(&c.name) => return None,
         // Gone from the desired state means back to the clean-shell default,
         // and the capture only records an option that differs from it.
@@ -100,6 +111,57 @@ fn unset_stmt(c: &Change) -> Option<String> {
             setopt(&c.name, if old == "on" { "off" } else { "on" })
         }
         _ => format!("unset {}", c.name),
+    })
+}
+
+/// `vals` is the rest of the `zle` line that made the widget: `-N` and its
+/// optional function, `-C`, a builtin and a function, or `-A` and the widget it
+/// aliases.
+fn zle(name: &str, vals: &[String]) -> Option<String> {
+    let (flag, rest) = vals.split_first()?;
+    let n = zq(name);
+    let rest: Vec<String> = rest.iter().map(|v| zq(v)).collect();
+    Some(match flag.as_str() {
+        "-A" => format!("zle -A -- {} {n}", rest.first()?),
+        // A completion widget whose function this shell lacks is not
+        // installed: `_main_complete` is compinit's and never synced, so a
+        // shell without compinit keeps the builtin — and gets it back, if an
+        // override it held is what this replaces.
+        "-C" => format!(
+            "if typeset -f -- {} >/dev/null; then\n  zle -C -- {n} {}\nelse\n  {}\nfi",
+            rest.last()?,
+            rest.join(" "),
+            zle_restore(name)
+        ),
+        f => format!("zle {} -- {n} {}", zq(f), rest.join(" "))
+            .trim_end()
+            .into(),
+    })
+}
+
+/// Overriding a builtin (`zle -N accept-line mine`) leaves the original under
+/// `.accept-line`; put that back rather than leave a key bound to nothing.
+/// Only builtins have a dotted twin.
+fn zle_restore(name: &str) -> String {
+    let n = zq(name);
+    let dot = zq(&format!(".{name}"));
+    format!("{{ zle -A -- {dot} {n} || zle -D -- {n} }} 2>/dev/null")
+}
+
+/// `vals` is a widget, `-s string`, or empty to unbind.
+fn bindkey(name: &str, vals: &[String]) -> Option<String> {
+    if name == "main" {
+        return Some(format!("bindkey -A {} main", zq(vals.first()?)));
+    }
+    let (map, key) = name.split_once(' ')?;
+    let (map, key) = (zq(map), zq(key));
+    Some(match vals {
+        [] => format!("bindkey -M {map} -r -- {key}"),
+        [s, v] if s == "-s" => format!("bindkey -M {map} -s -- {key} {}", zq(v)),
+        // A widget this shell lacks (`menu-select` before `zmodload
+        // zsh/complist`) would turn a working key into an error: keep the key.
+        [w] => format!("zle -la -- {w} && bindkey -M {map} -- {key} {w}", w = zq(w)),
+        _ => return None,
     })
 }
 
@@ -141,16 +203,19 @@ fn guarded(c: &Change, stmt: &str) -> String {
 }
 
 /// Ordered-list params first (`fpath` must land before any autoload stub in the
-/// same entry, §8.7), then the rest of the params, then functions, then aliases
-/// and `compdef` bindings — which have to follow the function they name.
+/// same entry, §8.7), then the rest of the params, then functions, then aliases,
+/// `compdef` bindings and widgets — which have to follow the function they name
+/// — then key bindings, which follow the widget.
 fn order(c: &Change) -> u8 {
     match c.kind {
         // The apply machinery rewriting itself, last: the guards for every
         // other key in the entry then run on one consistent version of it.
-        _ if c.name.starts_with("_sharezed_") => 4,
+        _ if c.name.starts_with("_sharezed_") => 5,
         _ if is_list(c.kind, &c.attrs) => 0,
         Kind::Scalar | Kind::Array | Kind::Assoc => 1,
         Kind::Func | Kind::Autoload => 2,
+        // After the widgets they name, so the check that one exists can pass.
+        Kind::Bindkey => 4,
         _ => 3,
     }
 }
@@ -218,7 +283,12 @@ pub fn generate(entries: &[(u64, Vec<Change>)], ours: &mut State, families: &[Pa
                     // Options are unguarded too: an option is never absent, so
                     // a shell can't tell "still at the default" from "you set it
                     // back by hand", and every shell starts at the default.
-                    if c.name.starts_with("_sharezed_") || c.kind == Kind::Setopt {
+                    // Bindings and widgets likewise: every shell starts at
+                    // the default, and a default binding would read as a
+                    // local edit to a guard that only knows the old value.
+                    if c.name.starts_with("_sharezed_")
+                        || matches!(c.kind, Kind::Setopt | Kind::Zle | Kind::Bindkey)
+                    {
                         code.push_str(&stmt);
                         code.push('\n');
                     } else {
@@ -340,6 +410,91 @@ mod tests {
         assert!(p.contains("\nunsetopt extendedglob\n"), "{p}");
         assert!(p.contains("\nsetopt beep\n"), "{p}");
         assert!(!p.contains("_sharezed_eq"), "options are unguarded: {p}");
+    }
+
+    #[test]
+    fn a_dropped_binding_puts_back_the_default_it_replaced() {
+        let w = change(Kind::Zle, "edit-command-line", "", Some(&["-N"]), None);
+        let k = change(
+            Kind::Bindkey,
+            "emacs ^U",
+            "kill-whole-line",
+            Some(&["backward-kill-line"]),
+            None,
+        );
+        let s = change(
+            Kind::Bindkey,
+            "emacs ^G",
+            "send-break",
+            Some(&["-s", "git st^J"]),
+            None,
+        );
+        let v = change(Kind::Bindkey, "main", "emacs", Some(&["viins"]), None);
+        let p = generate(&[(1, vec![k.clone(), w, s, v])], &mut State::new(), &[]);
+        assert!(p.contains("\nzle '-N' -- 'edit-command-line'\n"), "{p}");
+        assert!(
+            p.contains(
+                "zle -la -- 'backward-kill-line' && bindkey -M 'emacs' -- '^U' 'backward-kill-line'"
+            ),
+            "{p}"
+        );
+        assert!(
+            p.contains("bindkey -M 'emacs' -s -- '^G' 'git st^J'"),
+            "{p}"
+        );
+        assert!(p.contains("bindkey -A 'viins' main"), "{p}");
+        assert!(!p.contains("_sharezed_eq"), "bindings are unguarded: {p}");
+
+        let gone = |c: &Change| Change {
+            new: None,
+            old: c.new.clone(),
+            ..c.clone()
+        };
+        let unbound = change(Kind::Bindkey, "vicmd U", "", Some(&["redo"]), None);
+        let mac = change(Kind::Bindkey, "vicmd guu", "-s gugu", Some(&["x"]), None);
+        let w = change(Kind::Zle, "edit-command-line", "", Some(&["-N"]), None);
+        let v = change(Kind::Bindkey, "main", "emacs", Some(&["viins"]), None);
+        let p = generate(
+            &[(
+                2,
+                vec![gone(&k), gone(&unbound), gone(&w), gone(&v), gone(&mac)],
+            )],
+            &mut State::new(),
+            &[],
+        );
+        assert!(
+            p.contains(
+                "zle -la -- 'kill-whole-line' && bindkey -M 'emacs' -- '^U' 'kill-whole-line'"
+            ),
+            "{p}"
+        );
+        assert!(p.contains("bindkey -M 'vicmd' -r -- 'U'"), "{p}");
+        assert!(
+            p.contains("{ zle -A -- '.edit-command-line' 'edit-command-line' || zle -D -- 'edit-command-line' }"),
+            "{p}"
+        );
+        assert!(p.contains("bindkey -A 'emacs' main"), "{p}");
+        assert!(p.contains("bindkey -M 'vicmd' -s -- 'guu' 'gugu'"), "{p}");
+
+        let cw = change(
+            Kind::Zle,
+            "complete-word",
+            "",
+            Some(&["-C", ".complete-word", "_main_complete"]),
+            None,
+        );
+        let p = generate(&[(3, vec![cw])], &mut State::new(), &[]);
+        assert!(
+            p.contains(
+                "if typeset -f -- '_main_complete' >/dev/null; then\n  \
+                 zle -C -- 'complete-word' '.complete-word' '_main_complete'\nelse\n  \
+                 { zle -A -- '.complete-word' 'complete-word' || zle -D -- 'complete-word' }"
+            ),
+            "{p}"
+        );
+        let al = change(Kind::Zle, "saved", "", Some(&["-A", ".accept-line"]), None);
+        let p = generate(&[(4, vec![al])], &mut State::new(), &[]);
+        assert!(p.contains("\nzle -A -- '.accept-line' 'saved'\n"), "{p}");
     }
 
     #[test]

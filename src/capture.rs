@@ -16,13 +16,16 @@ pub struct Capture {
     pub commands: Vec<PathBuf>,
 }
 
-/// ponytail: `zsh -f -i -c` rather than a real pty (§7.1 option B+). It sets
-/// `interactive`, so `[[ -o interactive ]]` guards run; ZLE-dependent config
-/// (`bindkey`, `zle -N`) still fails and prints to stderr. Upgrade to `zsh/zpty`
-/// or a host pty if a real zshrc trips on it — that is PRD open question 1.
+/// `zsh -f -i -c`, no pty (§7.1). It sets `interactive`, so `[[ -o interactive ]]`
+/// guards run, and `bindkey`/`zle -N` work without ZLE ever reading a line.
+/// ponytail: no `$TTY`, so a zshrc's `stty` complains on stderr; add `zsh/zpty`
+/// if something that is actual state ever needs a terminal.
 /// `bootstrap: None` runs the startup files zsh itself would, in order.
 pub fn clean_room(bootstrap: Option<&Path>) -> R<Capture> {
-    let dir = std::env::temp_dir().join(format!("sharezed-{}", std::process::id()));
+    // Per call, not per process: two captures at once (tests) share a pid.
+    static N: std::sync::atomic::AtomicUsize = std::sync::atomic::AtomicUsize::new(0);
+    let n = N.fetch_add(1, std::sync::atomic::Ordering::Relaxed);
+    let dir = std::env::temp_dir().join(format!("sharezed-{}-{n}", std::process::id()));
     fs::create_dir_all(&dir)?;
     let f = |n: &str| dir.join(n);
     fs::write(f("capture.zsh"), include_str!("capture.zsh"))?;
